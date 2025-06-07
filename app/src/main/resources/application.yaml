@@ -1,0 +1,46 @@
+debug: true
+# TODO: probably could be more specific about amount for each table
+amountOfEntries: 1_000_000 # an amount of entries to generate
+connectionParameters:
+  host: localhost # db host
+  port: 5432 # db port
+  username: postgres # db username
+  password: postgres # db pass
+  dbName: test_db # db name
+# Format: schema.table
+tablesToGenerate:
+  - my-schema.my_cool_table
+# Format: schema.table.column -> schema.table.column
+# key: from which table we refer a field in another table
+# value: which table are we referring to
+# customTableLinks:
+#   my-schema.my_cool_table.id: my-schema.my_cool_referenced_table.id
+
+# Field generation rules
+# Available ruleTypes:
+# - LIST - The field value is randomly selected from the list of values, and the values are randomly selected.
+# - CONST - the first value from the "value" list is taken, the remaining values will be ignored.
+# - RANGE - a random value is taken from the range, numeric types and dates are supported in the Instant format 2025-04-04T10:30:15Z
+# - IGNORE - The field generation is ignored, you don't need to fill it in
+# The values are adjusted automatically to the required data type, if something does not work, then create issue.
+fieldGenerationRules:
+  # string field example
+  my-schema.my_cool_table.important_field:
+    ruleType: LIST
+    value:
+      - test1
+      - test2
+      - test3
+  # int field example with list, it will choose from values 5,10,15
+  my-schema.my_cool_table.version:
+    ruleType: LIST
+    value:
+      - 5
+      - 10
+      - 15
+  # Data field (Instant) with range
+  my-schema.my_cool_table.created_at:
+    ruleType: RANGE
+    value:
+      - 2025-01-01T10:30:15Z
+      - 2025-01-10T10:30:15Z
