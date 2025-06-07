@@ -21,7 +21,7 @@ import java.util.Map;
 @Slf4j
 public class CSVFileInserter extends Inserter implements DataInserter {
 
-    private static final Long LOGGING_STEP = 10_000L;
+    private static final Long LOGGING_STEP = 100_000L;
     // COPY <table> FROM <file>, docs: https://www.postgresql.org/docs/current/sql-copy.html
     private static final String SQL_COPY_CMD_TEMPLATE = "COPY %s FROM STDIN CSV HEADER DELIMITER ',';";
     private CopyManager copyManager;
@@ -47,6 +47,7 @@ public class CSVFileInserter extends Inserter implements DataInserter {
             writer.write(csvHeader);
             writer.newLine();
 
+            // TODO: maybe add option for multi threading to speed up generation
             for (int i = 0; i < parameters.getAmountOfEntries(); i++) {
                 writer.write(this.prepareDataForCsvFile(sourceTable, fields, fieldReferenceValueMap));
                 writer.newLine();
