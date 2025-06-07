@@ -108,14 +108,14 @@ public class PgSQLDataGenerator {
         formDatabaseStructure(parameters);
     }
 
-    private void extractTablesAndSchemas() throws SQLException {
+    private void extractTablesAndSchemas(Strategy strategy) throws SQLException {
         try (PreparedStatement statement = conn.prepareStatement(GET_DATABASE_STRUCTURE)) {
             ResultSet schemasAndTables = statement.executeQuery();
 
             while (schemasAndTables.next()) {
                 String schemaName = schemasAndTables.getString("schemaname");
                 String tableName = schemasAndTables.getString("tablename");
-                Map<String, String> tableFields = new HashMap<>();
+                Map<String, String> tableFields = new LinkedHashMap<>();
                 conn.setSchema(schemaName);
 
                 try (PreparedStatement getTableFieldsStatement = conn.prepareStatement(GET_TABLE_STRUCTURE)) {
@@ -129,7 +129,8 @@ public class PgSQLDataGenerator {
                         String columnType = getTableFieldsResult.getString("type");
                         boolean isSerial = getTableFieldsResult.getBoolean("is_serial");
 
-                        if (isSerial) {
+                        // for DEFAULT and MULTI insertion value can be ignored, but for FILE it should be used
+                        if (isSerial && !Strategy.FILE.equals(strategy)) {
                             columnType = "serial";
                         }
 
@@ -186,7 +187,7 @@ public class PgSQLDataGenerator {
     }
 
     private void formDatabaseStructure(Parameters parameters) throws SQLException {
-        extractTablesAndSchemas();
+        extractTablesAndSchemas(parameters.getStrategy());
         excludeTablesThatAreNotRequired(parameters.getTablesToGenerate());
         makeLinksBetweenTables();
         addCustomLinksBetweenTables(parameters.getCustomTableLinks());

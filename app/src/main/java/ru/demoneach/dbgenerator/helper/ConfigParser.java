@@ -59,6 +59,7 @@ public class ConfigParser {
         File jarFile = new File(url.toURI());
         String directory = jarFile.isFile() ? jarFile.getParentFile().getAbsolutePath() : jarFile.getAbsolutePath();
 
+        directory = "C:\\dev\\dbgenerator";
         String fileName = "application.yaml";
         File yamlFile = new File(directory, fileName);
         Parameters parameters;

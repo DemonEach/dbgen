@@ -1,5 +1,7 @@
 package ru.demoneach.dbgenerator.entity;
 
+import ru.demoneach.dbgenerator.helper.TypeConverterHelper;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalTime;
@@ -15,7 +17,7 @@ public class Field {
 
     public Field(String name, String dbType) {
         this.name = name;
-        this.dbType = dbTypeToJavaClass(dbType);
+        this.dbType = TypeConverterHelper.dbTypeToJavaClass(dbType);
         this.maxLength = extractMaxLength(dbType);
     } 
 
@@ -35,42 +37,6 @@ public class Field {
         }
 
         return Integer.valueOf(dbType);
-    }
-
-    /**
-     * Маппинг на основании статьи {@link https://www.postgresql.org/docs/current/datatype.html}
-     * </p>
-     * Есть и другие типы данных, но пока они не поддерживаются, так как очень редко используются 
-     */
-    private Class<?> dbTypeToJavaClass(String dbType) {
-        Pattern pattern = Pattern.compile("(character varying|character)\\(\\d+\\)");
-
-        if(pattern.matcher(dbType).matches()) {
-            return String.class;
-        }
-
-        return switch (dbType) {
-            case "uuid" -> UUID.class;
-            case "bigint" -> Long.class;
-            case "boolean" -> Boolean.class;
-            case "bytea" -> byte[].class;
-            case "text[]", "_text" -> String[].class;
-            case "jsonb" -> Map.class;
-            case "hstore" -> HashMap.class;
-            case "character", "character varying", "text" -> String.class;
-            case "money", "numeric", "double precision" -> BigDecimal.class;
-            case "real" -> Float.class;
-            case "integer" -> Integer.class;
-            case "timestamp", "date",
-                 "timestamp with time zone",
-                 "timestamp(6) with time zone",
-                 "timestamp without time zone",
-                 "timestamp(6) without time zone" -> Instant.class;
-            case "smallint" -> Short.class;
-            case "time" -> LocalTime.class;
-            case "serial", "smallserial", "bigserial" -> Ignorable.class;
-            default -> String.class;
-        };
     }
 
     public String getName() {

@@ -1,4 +1,4 @@
 package ru.demoneach.dbgenerator.entity;
 
-public class Ignorable {
+public abstract class Ignorable {
 }

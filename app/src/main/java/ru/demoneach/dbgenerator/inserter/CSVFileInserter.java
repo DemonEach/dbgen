@@ -2,20 +2,18 @@ package ru.demoneach.dbgenerator.inserter;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import lombok.extern.slf4j.Slf4j;
+import org.postgresql.copy.CopyManager;
+import org.postgresql.core.BaseConnection;
 import ru.demoneach.dbgenerator.App;
 import ru.demoneach.dbgenerator.entity.Field;
 import ru.demoneach.dbgenerator.entity.Parameters;
 import ru.demoneach.dbgenerator.entity.Rule;
 import ru.demoneach.dbgenerator.entity.Table;
 
-import java.io.BufferedWriter;
-import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
+import java.io.*;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.sql.Connection;
-import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
@@ -23,11 +21,14 @@ import java.util.Map;
 @Slf4j
 public class CSVFileInserter extends Inserter implements DataInserter {
 
+    private static final Long LOGGING_STEP = 10_000L;
     // COPY <table> FROM <file>, docs: https://www.postgresql.org/docs/current/sql-copy.html
-    private static final String SQL_COPY_CMD_TEMPLATE = "COPY %s FROM %s WITH (FORMAT CSV)";
+    private static final String SQL_COPY_CMD_TEMPLATE = "COPY %s FROM STDIN CSV HEADER DELIMITER ',';";
+    private CopyManager copyManager;
 
-    public CSVFileInserter(Map<String, Rule> fieldGenerationRules, Connection conn) {
+    public CSVFileInserter(Map<String, Rule> fieldGenerationRules, Connection conn) throws SQLException {
         super(fieldGenerationRules, conn);
+        this.copyManager = new CopyManager((BaseConnection) conn);
     }
 
     @Override
@@ -50,19 +51,22 @@ public class CSVFileInserter extends Inserter implements DataInserter {
                 writer.write(this.prepareDataForCsvFile(sourceTable, fields, fieldReferenceValueMap));
                 writer.newLine();
 
-                if (i % 1000 == 0) {
-                    log.debug("Generated {} of {} entries for table: {}", i, parameters.getAmountOfEntries(), sourceTable);
+                if (i % LOGGING_STEP == 0) {
+                    log.info("Generated {} of {} entries for table: {}", i, parameters.getAmountOfEntries(), sourceTable);
                 }
             }
         } catch (IOException e) {
             log.error("Cannot create file", e);
         }
 
-        log.debug("CSV File for table {} successfully created at: {}", sourceTable.getTableName(), csvFile.getAbsolutePath());
+        log.info("CSV File for table {} successfully created at: {}", sourceTable.getTableName(), csvFile.getAbsolutePath());
+        String sqlCopyStatement = SQL_COPY_CMD_TEMPLATE.formatted(sourceTable.getTableName());
 
-        String sqlCopyStatement = SQL_COPY_CMD_TEMPLATE.formatted(sourceTable.getTableName(), csvFile.getAbsolutePath());
-        try(PreparedStatement copyStatement = this.getConn().prepareStatement(sqlCopyStatement)) {
-            copyStatement.execute();
+        try {
+            long rowsUpdated = copyManager.copyIn(sqlCopyStatement, new FileInputStream(csvFile));
+            log.debug("Inserted/updated {} from CSV file: {}", rowsUpdated, csvFile.getAbsolutePath());
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         }
     }
 
@@ -73,16 +77,34 @@ public class CSVFileInserter extends Inserter implements DataInserter {
             if (fieldReferenceValueMap.containsKey(fields.get(i))) {
                 List<Object> fieldValues = fieldReferenceValueMap.get(fields.get(i));
                 Object queryParamValue = fieldValues.remove(fieldValues.size() - 1);
-                stringBuilder.append(queryParamValue);
+                stringBuilder.append("\"").append(queryParamValue);
             } else {
                 Object generatedObject = this.getDataGenerator().generateDataForField(table.toString(), fields.get(i));
-                stringBuilder.append(generatedObject);
+
+                if (generatedObject.getClass().isArray()) {
+                    generatedObject = convertArrayToInsertableString((Object[]) generatedObject);
+                }
+
+                stringBuilder.append("\"").append(generatedObject);
             }
 
-            stringBuilder.append(",");
+            stringBuilder.append("\"").append(",");
         }
 
         stringBuilder.setLength(stringBuilder.length() - 1);
+        return stringBuilder.toString();
+    }
+
+    private String convertArrayToInsertableString(Object[] array) {
+        StringBuilder stringBuilder = new StringBuilder();
+        stringBuilder.append("{");
+
+        for (int i = 0; i < array.length; i++) {
+            stringBuilder.append((String) array[i]).append(",");
+        }
+
+        stringBuilder.setLength(stringBuilder.length() - 1);
+        stringBuilder.append("}");
         return stringBuilder.toString();
     }
 
@@ -94,7 +116,7 @@ public class CSVFileInserter extends Inserter implements DataInserter {
                 continue;
             }
 
-            sb.append(fields.get(i).getName()).append(",");
+            sb.append("\"").append(fields.get(i).getName()).append("\"").append(",");
         }
 
         sb.setLength(sb.length() - 1);
