@@ -59,41 +59,6 @@ public class TypeConverterHelper {
             }
             default -> preparedStatement.setObject(index, object.toString());
         }
-//
-//        if (field.getDbType().equals(String.class)) {
-//            preparedStatement.setString(index, (String) object);
-//        } else if (field.getDbType().equals(Integer.class)) {
-//            preparedStatement.setInt(index, (Integer) object);
-//        } else if (field.getDbType().equals(Long.class)) {
-//            preparedStatement.setLong(index, (Long) object);
-//        } else if (field.getDbType().equals(Boolean.class)) {
-//            preparedStatement.setBoolean(index, (Boolean) object);
-//        } else if (field.getDbType().equals(Float.class)) {
-//            preparedStatement.setFloat(index, (Float) object);
-//        } else if (field.getDbType().equals(Short.class)) {
-//            preparedStatement.setShort(index, (Short) object);
-//        } else if (field.getDbType().equals(Instant.class)) {
-//            preparedStatement.setTimestamp(index, Timestamp.from((Instant) object));
-//        } else if (field.getDbType().equals(BigDecimal.class)) {
-//            preparedStatement.setBigDecimal(index, (BigDecimal) object);
-//        } else if (field.getDbType().equals(UUID.class)) {
-//            preparedStatement.setObject(index, object);
-//        } else if (field.getDbType().equals(LocalTime.class)) {
-//            preparedStatement.setTime(index, (Time) object);
-//        } else if (field.getDbType().equals(Map.class)) {
-//            PGobject jsonObject = new PGobject();
-//            jsonObject.setType("jsonb");
-//            jsonObject.setValue(PrettyJsonLogger.asDefaultString(object));
-//            preparedStatement.setObject(index, jsonObject);
-//        } else if (field.getDbType().equals(String[].class)) {
-//            // don't like that I need connection to create a simple array, seems stupid
-//            Array arr = conn.createArrayOf("text", (String[]) object);
-//            preparedStatement.setArray(index, arr);
-//        } else if (field.getDbType().equals(byte[].class)) {
-//            preparedStatement.setBytes(index, convertObjectToBytes(object));
-//        } else {
-//            preparedStatement.setObject(index, object.toString());
-//        }
     }
 
     private static byte[] convertObjectToBytes(Object object) {

@@ -15,7 +15,7 @@ public class Parameters {
     private Integer batch = 1;
     private Integer batchSave = 10;
     private Strategy strategy = Strategy.DEFAULT;
-    // список таблиц со схемами в формате schema.table
+    // a list of tables with schemas with format: schema.table
     private List<String> tablesToGenerate;
     private ConnectionParameters connectionParameters;
     private Integer amountOfEntries = 1000;

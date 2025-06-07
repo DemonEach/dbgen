@@ -3,7 +3,7 @@ package ru.demoneach.dbgenerator.entity;
 import java.util.Map;
 
 public class ReferenceEdge {
-    // возможно может быть ситуация с несколькими референсами одного филда, но такого по идее быть не должно в большинстве случаев
+    // perhaps there may be a situation with several references of the same field, but this should not be the case in most cases.
     private Map<Field, Field> referencedFields;
 
     public ReferenceEdge() {}

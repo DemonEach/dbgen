@@ -31,16 +31,11 @@ public class MultiValuesInserter extends Inserter implements DataInserter {
         try (PreparedStatement preparedStatement = this.getConn().prepareStatement(sqlQuery)) {
             for (int i = 0; i < parameters.getAmountOfEntries() / batch; i++) {
                 prepareDataForStatementForMultipleValues(sourceTable, preparedStatement, fields, batch);
-//                preparedStatement.addBatch();
                 if (Objects.nonNull(fieldReferenceValueMap) && !fieldReferenceValueMap.isEmpty()) {
                     setReferencedFieldFromList(preparedStatement, fields, fieldReferenceValueMap, batch);
                 }
 
                 preparedStatement.execute();
-//                if (i % parameters.getBatchSave() == 0 && i > 0) {
-//                    preparedStatement.executeBatch();
-//                    preparedStatement.clearBatch();
-//                }
             }
 
             preparedStatement.execute();

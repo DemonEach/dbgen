@@ -146,7 +146,7 @@ public class PgSQLDataGenerator {
     private void makeLinksBetweenTables() throws SQLException {
         Set<Table> verticies = this.databaseLayout.getLayoutGraph().vertexSet();
         for (Table table : verticies) {
-            // TODO: надо учитывать также другие констреинты, как например "unique"
+            // TODO: it would be nice to account for other constraints, i.e "unique"
             try (PreparedStatement getReferencesStatement = conn.prepareStatement(GET_REFERENCES_FOR_TABLE_AND_FIELDS)) {
                 conn.setSchema(table.getSchema());
                 getReferencesStatement.setString(1, "%s.%s".formatted(table.getSchema(), table.getTableName()));
@@ -332,7 +332,7 @@ public class PgSQLDataGenerator {
             Table table = queue.poll();
             result.add(table);
 
-            // Уменьшаем количество входящих ребер для соседних вершин
+            // Reducing the number of incoming edges for neighboring vertices
             for (ReferenceEdge edge : graph.outgoingEdgesOf(table)) {
                 Table neighbor = graph.getEdgeTarget(edge);
                 inDegree.put(neighbor, inDegree.get(neighbor) - 1);
@@ -344,7 +344,7 @@ public class PgSQLDataGenerator {
             }
         }
 
-        // Если размер результата не равен количеству вершин, значит в графе есть цикл
+        // If the result size is not equal to the number of vertices, then there is a cycle in the graph
         if (result.size() != graph.vertexSet().size()) {
             throw new IllegalStateException("Граф содержит цикл, топологическая сортировка невозможна");
         }
