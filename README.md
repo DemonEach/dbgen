@@ -11,7 +11,7 @@ A cli tool to generate data for database
 
 - Postgresql
     - Generation strategies:
-      - With csv file via "COPY" (WIP)
+      - With csv file via "COPY"
       - Bulk inserts
       - Inserts
 
