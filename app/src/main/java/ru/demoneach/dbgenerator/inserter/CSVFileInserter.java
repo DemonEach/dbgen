@@ -5,10 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.postgresql.copy.CopyManager;
 import org.postgresql.core.BaseConnection;
 import ru.demoneach.dbgenerator.App;
-import ru.demoneach.dbgenerator.entity.Field;
-import ru.demoneach.dbgenerator.entity.Parameters;
-import ru.demoneach.dbgenerator.entity.Rule;
-import ru.demoneach.dbgenerator.entity.Table;
+import ru.demoneach.dbgenerator.entity.*;
 
 import java.io.*;
 import java.net.URISyntaxException;
@@ -48,8 +45,8 @@ public class CSVFileInserter extends Inserter implements DataInserter {
             writer.newLine();
 
             // TODO: maybe add option for multi threading to speed up generation
-            for (int i = 0; i < parameters.getAmountOfEntries(); i++) {
-                writer.write(this.prepareDataForCsvFile(sourceTable, fields, fieldReferenceValueMap));
+            for (long i = 0; i < parameters.getAmountOfEntries(); i++) {
+                writer.write(this.prepareDataForCsvFile(sourceTable, fields, fieldReferenceValueMap, i + 1));
                 writer.newLine();
 
                 if (i % LOGGING_STEP == 0) {
@@ -71,7 +68,7 @@ public class CSVFileInserter extends Inserter implements DataInserter {
         }
     }
 
-    private String prepareDataForCsvFile(Table table, List<Field> fields, Map<Field, List<Object>> fieldReferenceValueMap) throws JsonProcessingException {
+    private String prepareDataForCsvFile(Table table, List<Field> fields, Map<Field, List<Object>> fieldReferenceValueMap, Long positiveSeq) throws JsonProcessingException {
         StringBuilder stringBuilder = new StringBuilder();
 
         for (int i = 0; i < fields.size(); i++) {
@@ -80,7 +77,13 @@ public class CSVFileInserter extends Inserter implements DataInserter {
                 Object queryParamValue = fieldValues.remove(fieldValues.size() - 1);
                 stringBuilder.append("\"").append(queryParamValue);
             } else {
-                Object generatedObject = this.getDataGenerator().generateDataForField(table.toString(), fields.get(i));
+                Object generatedObject;
+
+                if (fields.get(i).getDbType().equals(SequentialPositive.class)) {
+                    generatedObject = positiveSeq;
+                } else {
+                    generatedObject = this.getDataGenerator().generateDataForField(table.toString(), fields.get(i));
+                }
 
                 if (generatedObject.getClass().isArray()) {
                     generatedObject = convertArrayToInsertableString((Object[]) generatedObject);

@@ -9,8 +9,8 @@ import java.util.Random;
 public class CustomStringRandomizer implements Randomizer<String> {
 
     private static final String ALLOWED_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    private static final int MIN_LENGTH = 5;
-    private static final int MAX_LENGTH = 10;
+    private static final int MIN_LENGTH = 2;
+    private static final int MAX_LENGTH = 5;
     private final Random rand = new Random();
 
     @Override

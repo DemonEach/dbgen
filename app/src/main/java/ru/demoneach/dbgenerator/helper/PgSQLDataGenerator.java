@@ -4,8 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import lombok.extern.slf4j.Slf4j;
 import org.jgrapht.Graph;
 import ru.demoneach.dbgenerator.entity.*;
-import ru.demoneach.dbgenerator.entity.*;
-import ru.demoneach.dbgenerator.entity.exception.ConfigParsingException;
+import ru.demoneach.dbgenerator.exception.ConfigParsingException;
 import ru.demoneach.dbgenerator.inserter.CSVFileInserter;
 import ru.demoneach.dbgenerator.inserter.DataInserter;
 import ru.demoneach.dbgenerator.inserter.MultiValuesInserter;
@@ -129,9 +128,13 @@ public class PgSQLDataGenerator {
                         String columnType = getTableFieldsResult.getString("type");
                         boolean isSerial = getTableFieldsResult.getBoolean("is_serial");
 
-                        // for DEFAULT and MULTI insertion value can be ignored, but for FILE it should be used
-                        if (isSerial && !Strategy.FILE.equals(strategy)) {
+                        if (isSerial) {
                             columnType = "serial";
+                        }
+
+                        // for DEFAULT and MULTI insertion value can be ignored, but for FILE it should be used
+                        if (!Strategy.FILE.equals(strategy)) {
+                            columnType = TypeConverterHelper.IGNORED;
                         }
 
                         tableFields.put(columnName, columnType);

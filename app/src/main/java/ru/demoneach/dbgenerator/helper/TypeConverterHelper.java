@@ -4,7 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import org.postgresql.util.PGobject;
 import ru.demoneach.dbgenerator.entity.Field;
 import ru.demoneach.dbgenerator.entity.Ignorable;
-import ru.demoneach.dbgenerator.entity.Strategy;
+import ru.demoneach.dbgenerator.entity.SequentialPositive;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -19,6 +19,8 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 
 public class TypeConverterHelper {
+
+    public static final String IGNORED = "ignored";
 
     public static Object convertObjectToCorrectType(Class clazz, String objectStringRepresentation) {
         return switch (clazz) {
@@ -42,7 +44,8 @@ public class TypeConverterHelper {
             case Class c when Boolean.class.equals(c) -> preparedStatement.setBoolean(index, (Boolean) object);
             case Class c when Float.class.equals(c) -> preparedStatement.setFloat(index, (Float) object);
             case Class c when Short.class.equals(c) -> preparedStatement.setShort(index, (Short) object);
-            case Class c when Instant.class.equals(c) -> preparedStatement.setTimestamp(index, Timestamp.from((Instant) object));
+            case Class c when Instant.class.equals(c) ->
+                    preparedStatement.setTimestamp(index, Timestamp.from((Instant) object));
             case Class c when BigDecimal.class.equals(c) -> preparedStatement.setBigDecimal(index, (BigDecimal) object);
             case Class c when UUID.class.equals(c) -> preparedStatement.setObject(index, object);
             case Class c when byte[].class.equals(c) -> preparedStatement.setBytes(index, convertObjectToBytes(object));
@@ -79,7 +82,7 @@ public class TypeConverterHelper {
     public static Class<?> dbTypeToJavaClass(String dbType) {
         Pattern pattern = Pattern.compile("(character varying|character)\\(\\d+\\)");
 
-        if(pattern.matcher(dbType).matches()) {
+        if (pattern.matcher(dbType).matches()) {
             return String.class;
         }
 
@@ -102,8 +105,8 @@ public class TypeConverterHelper {
                  "timestamp(6) without time zone" -> Instant.class;
             case "smallint" -> Short.class;
             case "time" -> LocalTime.class;
-            case "serial", "smallserial", "bigserial" -> Ignorable.class;
-            default -> String.class;
+            case "serial", "smallserial", "bigserial" -> SequentialPositive.class;
+            default -> Ignorable.class;
         };
     }
 }

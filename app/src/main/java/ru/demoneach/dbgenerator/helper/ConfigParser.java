@@ -17,8 +17,8 @@ import ch.qos.logback.classic.Logger;
 import lombok.extern.slf4j.Slf4j;
 import ru.demoneach.dbgenerator.App;
 import ru.demoneach.dbgenerator.entity.Parameters;
-import ru.demoneach.dbgenerator.entity.exception.ConfigParsingException;
-import ru.demoneach.dbgenerator.entity.exception.ParametFormatException;
+import ru.demoneach.dbgenerator.exception.ConfigParsingException;
+import ru.demoneach.dbgenerator.exception.ParametFormatException;
 
 @Slf4j
 public class ConfigParser {

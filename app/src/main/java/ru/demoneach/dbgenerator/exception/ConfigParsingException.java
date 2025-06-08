@@ -1,4 +1,4 @@
-package ru.demoneach.dbgenerator.entity.exception;
+package ru.demoneach.dbgenerator.exception;
 
 public class ConfigParsingException extends RuntimeException {
     
