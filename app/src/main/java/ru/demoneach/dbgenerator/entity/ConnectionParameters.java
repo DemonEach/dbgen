@@ -85,7 +85,7 @@ public class ConnectionParameters {
 
     @Override
     public String toString() {
-        return "ConnectionParameters [host=" + host + ", port=" + port + ", userName=" + username + ", password=" + password + ", dbName=" + dbName + "]";
+        return "ConnectionParameters [host=" + host + ", port=" + port + ", userName=" + username + ", password=" + (password == null ? null : "****") + ", dbName=" + dbName + "]";
     }
 
 }
