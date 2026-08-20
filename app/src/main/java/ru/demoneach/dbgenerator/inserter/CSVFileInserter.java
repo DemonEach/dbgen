@@ -14,13 +14,17 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Slf4j
 public class CSVFileInserter extends Inserter implements DataInserter {
 
     private static final Long LOGGING_STEP = 100_000L;
-    // COPY <table> FROM <file>, docs: https://www.postgresql.org/docs/current/sql-copy.html
-    private static final String SQL_COPY_CMD_TEMPLATE = "COPY %s FROM STDIN CSV HEADER DELIMITER ',';";
+    // COPY <table> (<columns>) FROM <file>, docs: https://www.postgresql.org/docs/current/sql-copy.html
+    // the column list is required: ignored fields are not written to the csv, so the table column
+    // order alone does not describe the file
+    private static final String SQL_COPY_CMD_TEMPLATE =
+            "COPY \"%s\".\"%s\" (%s) FROM STDIN CSV HEADER DELIMITER ',';";
     private CopyManager copyManager;
 
     public CSVFileInserter(Map<String, Rule> fieldGenerationRules, Connection conn) throws SQLException {
@@ -31,7 +35,13 @@ public class CSVFileInserter extends Inserter implements DataInserter {
     @Override
     public void generateAndInsert(Table sourceTable, Parameters parameters, Map<Field, List<Object>> fieldReferenceValueMap) throws SQLException, JsonProcessingException, URISyntaxException {
         List<Field> fields = this.getRuleEnforcer().filterIgnoredFields(sourceTable);
-        String csvHeader = this.generateCsvHeader(sourceTable, fields);
+
+        if (fields.isEmpty()) {
+            log.warn("Table {} has no fields to generate, skipping it", sourceTable);
+            return;
+        }
+
+        String csvHeader = this.generateColumnList(fields);
         URL url = App.class.getProtectionDomain().getCodeSource().getLocation();
         File jarFile = new File(url.toURI());
         String directory = jarFile.isFile() ? jarFile.getParentFile().getAbsolutePath() : jarFile.getAbsolutePath();
@@ -58,7 +68,8 @@ public class CSVFileInserter extends Inserter implements DataInserter {
         }
 
         log.info("CSV File for table {} successfully created at: {}", sourceTable.getTableName(), csvFile.getAbsolutePath());
-        String sqlCopyStatement = SQL_COPY_CMD_TEMPLATE.formatted(sourceTable.getTableName());
+        String sqlCopyStatement = SQL_COPY_CMD_TEMPLATE.formatted(
+                sourceTable.getSchema(), sourceTable.getTableName(), csvHeader);
 
         try {
             long rowsUpdated = copyManager.copyIn(sqlCopyStatement, new FileInputStream(csvFile));
@@ -112,19 +123,13 @@ public class CSVFileInserter extends Inserter implements DataInserter {
         return stringBuilder.toString();
     }
 
-    public String generateCsvHeader(Table table, List<Field> fields) {
-        StringBuilder sb = new StringBuilder();
-
-        for (int i = 0; i < fields.size(); i++) {
-            if (this.getRuleEnforcer().checkIfFieldIgnored(table, fields.get(i))) {
-                continue;
-            }
-
-            sb.append("\"").append(fields.get(i).getName()).append("\"").append(",");
-        }
-
-        sb.setLength(sb.length() - 1);
-
-        return sb.toString();
+    /**
+     * Builds the quoted, comma separated column list. It is used both as the csv header and as the
+     * column list of the COPY statement, so the two can not drift apart.
+     */
+    private String generateColumnList(List<Field> fields) {
+        return fields.stream()
+                .map(field -> "\"%s\"".formatted(field.getName()))
+                .collect(Collectors.joining(","));
     }
 }

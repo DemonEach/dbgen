@@ -128,13 +128,12 @@ public class PgSQLDataGenerator {
                         String columnType = getTableFieldsResult.getString("type");
                         boolean isSerial = getTableFieldsResult.getBoolean("is_serial");
 
+                        // for DEFAULT and MULTI insertion the serial value can be ignored (the DB
+                        // fills it itself), but for FILE it has to be present in the CSV
                         if (isSerial) {
-                            columnType = "serial";
-                        }
-
-                        // for DEFAULT and MULTI insertion value can be ignored, but for FILE it should be used
-                        if (!Strategy.FILE.equals(strategy)) {
-                            columnType = TypeConverterHelper.IGNORED;
+                            columnType = Strategy.FILE.equals(strategy)
+                                    ? "serial"
+                                    : TypeConverterHelper.IGNORED;
                         }
 
                         tableFields.put(columnName, columnType);

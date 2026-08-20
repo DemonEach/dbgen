@@ -2,14 +2,6 @@ package ru.demoneach.dbgenerator.entity;
 
 import ru.demoneach.dbgenerator.helper.TypeConverterHelper;
 
-import java.math.BigDecimal;
-import java.time.Instant;
-import java.time.LocalTime;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.UUID;
-import java.util.regex.Pattern;
-
 public class Field {
     private String name;
     private Class<?> dbType;
@@ -18,25 +10,7 @@ public class Field {
     public Field(String name, String dbType) {
         this.name = name;
         this.dbType = TypeConverterHelper.dbTypeToJavaClass(dbType);
-        this.maxLength = extractMaxLength(dbType);
-    } 
-
-    private Integer extractMaxLength(String dbType) {
-        if (dbType == null) {
-            return null;
-        }
-
-        if (dbType.isEmpty()) {
-            return null;
-        }
-
-        dbType = dbType.replaceAll("[^\\d.]", "");
-
-        if (dbType.isEmpty()) {
-            return null;
-        }
-
-        return Integer.valueOf(dbType);
+        this.maxLength = TypeConverterHelper.extractMaxLength(dbType);
     }
 
     public String getName() {

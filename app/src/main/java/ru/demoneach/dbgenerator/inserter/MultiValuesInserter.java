@@ -25,11 +25,37 @@ public class MultiValuesInserter extends Inserter implements DataInserter {
     @Override
     public void generateAndInsert(Table sourceTable, Parameters parameters, Map<Field, List<Object>> fieldReferenceValueMap) throws SQLException, JsonProcessingException, URISyntaxException {
         List<Field> fields = this.getRuleEnforcer().filterIgnoredFields(sourceTable);
-        Integer batch = parameters.getBatch();
 
+        if (fields.isEmpty()) {
+            log.warn("Table {} has no fields to generate, skipping it", sourceTable);
+            return;
+        }
+
+        int batch = parameters.getBatch();
+        int amountOfEntries = parameters.getAmountOfEntries();
+
+        int fullBatches = amountOfEntries / batch;
+        int remainder = amountOfEntries % batch;
+
+        if (fullBatches > 0) {
+            insertInBatchesOf(sourceTable, fields, fieldReferenceValueMap, batch, fullBatches);
+        }
+
+        // amountOfEntries is not necessarily a multiple of batch, the rest goes in a smaller statement
+        if (remainder > 0) {
+            insertInBatchesOf(sourceTable, fields, fieldReferenceValueMap, remainder, 1);
+        }
+    }
+
+    private void insertInBatchesOf(Table sourceTable,
+                                   List<Field> fields,
+                                   Map<Field, List<Object>> fieldReferenceValueMap,
+                                   int batch,
+                                   int timesToExecute) throws SQLException, JsonProcessingException {
         String sqlQuery = this.generateMultipleValuesInsertSqlTemplateString(sourceTable, fields, batch);
+
         try (PreparedStatement preparedStatement = this.getConn().prepareStatement(sqlQuery)) {
-            for (int i = 0; i < parameters.getAmountOfEntries() / batch; i++) {
+            for (int i = 0; i < timesToExecute; i++) {
                 prepareDataForStatementForMultipleValues(sourceTable, preparedStatement, fields, batch);
                 if (Objects.nonNull(fieldReferenceValueMap) && !fieldReferenceValueMap.isEmpty()) {
                     setReferencedFieldFromList(preparedStatement, fields, fieldReferenceValueMap, batch);
@@ -37,8 +63,6 @@ public class MultiValuesInserter extends Inserter implements DataInserter {
 
                 preparedStatement.execute();
             }
-
-            preparedStatement.execute();
         }
     }
 

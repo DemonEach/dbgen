@@ -4,6 +4,5 @@ public enum RuleType {
     CONST,
     LIST,
     RANGE,
-    REGEX,
     IGNORE
 }

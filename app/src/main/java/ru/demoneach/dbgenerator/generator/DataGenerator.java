@@ -43,9 +43,11 @@ public class DataGenerator {
             return ruleEnforcer.extractRuleValueOrDefault(schemaTable, field, str);
         }
 
-        // JSON handling
+        // JSON handling: a random Map cannot be generated in a meaningful way,
+        // so a dummy object is generated and serialized to json instead
         if (field.getDbType().equals(Map.class)) {
-            this.generalGenerator.nextObject(DummyObject.class);
+            return ruleEnforcer.extractRuleValueOrDefault(
+                    schemaTable, field, this.generalGenerator.nextObject(DummyObject.class));
         }
 
         return ruleEnforcer.extractRuleValueOrDefault(schemaTable, field, this.generalGenerator.nextObject(field.getDbType()));
@@ -63,8 +65,10 @@ public class DataGenerator {
                     random.nextDouble((Double) maxBound - (Double) minBound) + (Double) minBound;
             case Class c when Long.class.equals(c) ->
                     random.nextLong((Long) maxBound - (Long) minBound) + (Long) minBound;
+            // the cast has to cover the whole expression, otherwise the result is an Integer
+            // and setShort() later fails with a ClassCastException
             case Class c when Short.class.equals(c) ->
-                    (short) random.nextInt((Short) maxBound - (Short) minBound) + (Short) minBound;
+                    (short) (random.nextInt((Short) maxBound - (Short) minBound) + (Short) minBound);
             case Class c when Float.class.equals(c) ->
                     random.nextFloat((Float) maxBound - (Float) minBound) + (Float) minBound;
             case Class c when Instant.class.equals(c) ->

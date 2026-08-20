@@ -16,11 +16,16 @@ import java.time.LocalTime;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class TypeConverterHelper {
 
     public static final String IGNORED = "ignored";
+
+    // character varying(255), character(3), ... - the only types carrying a length limit we care about
+    private static final Pattern CHAR_TYPE_WITH_LENGTH =
+            Pattern.compile("^(?:character varying|character|varchar|char)\\((\\d+)\\)$");
 
     public static Object convertObjectToCorrectType(Class clazz, String objectStringRepresentation) {
         return switch (clazz) {
@@ -64,6 +69,21 @@ public class TypeConverterHelper {
         }
     }
 
+    /**
+     * Extracts the declared length of a character type, i.e. 255 out of "character varying(255)".
+     *
+     * @return the declared length, or null if the type carries no length limit
+     */
+    public static Integer extractMaxLength(String dbType) {
+        if (dbType == null || dbType.isEmpty()) {
+            return null;
+        }
+
+        Matcher matcher = CHAR_TYPE_WITH_LENGTH.matcher(dbType);
+
+        return matcher.matches() ? Integer.valueOf(matcher.group(1)) : null;
+    }
+
     private static byte[] convertObjectToBytes(Object object) {
         try (ByteArrayOutputStream bos = new ByteArrayOutputStream();
              ObjectOutputStream out = new ObjectOutputStream(bos)) {
@@ -80,9 +100,7 @@ public class TypeConverterHelper {
      * There is another data types that being used quite rarely so at the moment they are not supported
      */
     public static Class<?> dbTypeToJavaClass(String dbType) {
-        Pattern pattern = Pattern.compile("(character varying|character)\\(\\d+\\)");
-
-        if (pattern.matcher(dbType).matches()) {
+        if (CHAR_TYPE_WITH_LENGTH.matcher(dbType).matches()) {
             return String.class;
         }
 

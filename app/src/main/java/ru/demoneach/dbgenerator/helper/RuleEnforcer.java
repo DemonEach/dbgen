@@ -20,6 +20,7 @@ import java.util.Random;
 public class RuleEnforcer {
 
     private static final String KEY_TEMPLATE = "%s.%s";
+    private static final Random RANDOM = new Random();
 
     private Map<String, Rule> fieldGenerationRules;
 
@@ -38,10 +39,12 @@ public class RuleEnforcer {
             return defaultValue;
         }
 
+        // the switch is exhaustive on purpose: adding a new RuleType must not silently
+        // fall through to a default branch that puts a raw List into the column
         return switch (rule.getRuleType()) {
             case CONST -> TypeConverterHelper.convertObjectToCorrectType(field.getDbType(), rule.getValue().get(0));
             case LIST -> {
-                String str = rule.getValue().get(new Random().nextInt(rule.getValue().size()));
+                String str = rule.getValue().get(RANDOM.nextInt(rule.getValue().size()));
                 yield TypeConverterHelper.convertObjectToCorrectType(field.getDbType(), str);
             }
             case RANGE -> {
@@ -50,20 +53,17 @@ public class RuleEnforcer {
 
                 yield DataGenerator.generateRandomValuesInRange(minRange, maxRange);
             }
-            default -> rule.getValue();
+            // the field is filtered out before generation, so this is only a safety net
+            case IGNORE -> defaultValue;
         };
     }
 
-    public boolean checkIfHasRulesForField(String schemaTable, String fieldName) {
-        return this.fieldGenerationRules.containsKey(KEY_TEMPLATE.formatted(schemaTable, fieldName));
-    }
-
-    private boolean checkIfHasRuleType(String tableName, String fieldName, RuleType ruleType) {
+    private boolean checkIfHasRuleType(String schemaTable, String fieldName, RuleType ruleType) {
         if (Objects.isNull(fieldGenerationRules) || fieldGenerationRules.isEmpty()) {
             return false;
         }
 
-        Rule rule = this.fieldGenerationRules.get(KEY_TEMPLATE.formatted(tableName, fieldName));
+        Rule rule = this.fieldGenerationRules.get(KEY_TEMPLATE.formatted(schemaTable, fieldName));
 
         if (rule == null || rule.getRuleType() == null) {
             return false;
@@ -77,7 +77,8 @@ public class RuleEnforcer {
             return true;
         }
 
-        return checkIfHasRuleType(table.getTableName(), field.getName(), RuleType.IGNORE);
+        // rules are keyed by schema.table.column, so the schema qualified name is required here
+        return checkIfHasRuleType(table.toString(), field.getName(), RuleType.IGNORE);
     }
 
     public List<Field> filterIgnoredFields(Table table) {

@@ -20,9 +20,9 @@ dependencies {
     testImplementation libs.junit.jupiter
 
     implementation 'org.yaml:snakeyaml:2.4'
-    implementation 'org.slf4j:slf4j-api:1.7.36'
-    implementation 'org.slf4j:slf4j-simple:1.7.36'
-    implementation 'org.slf4j:slf4j-log4j12:2.0.15'
+    // Only one SLF4J binding must be on the classpath: the code casts the root logger
+    // to ch.qos.logback.classic.Logger, so logback has to be the one that wins.
+    implementation 'org.slf4j:slf4j-api:2.0.16'
 
     implementation 'org.postgresql:postgresql:42.7.5'
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.18.3'
@@ -32,8 +32,6 @@ dependencies {
     implementation 'org.jgrapht:jgrapht-ext:1.5.2'
 
     compileOnly 'org.projectlombok:lombok:1.18.36'
-    compileOnly 'org.slf4j:slf4j-api:1.7.36'
-    compileOnly 'org.slf4j:slf4j-simple:1.7.36'
 
     annotationProcessor 'org.projectlombok:lombok:1.18.36'
 	

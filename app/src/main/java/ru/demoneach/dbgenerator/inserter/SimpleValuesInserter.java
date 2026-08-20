@@ -27,6 +27,11 @@ public class SimpleValuesInserter extends Inserter implements DataInserter {
         this.getConn().setSchema(sourceTable.getSchema());
         List<Field> fields = this.getRuleEnforcer().filterIgnoredFields(sourceTable);
 
+        if (fields.isEmpty()) {
+            log.warn("Table {} has no fields to generate, skipping it", sourceTable);
+            return;
+        }
+
         String sqlQuery = this.generateInsertSqlTemplateString(sourceTable, fields);
         try (PreparedStatement preparedStatement = this.getConn().prepareStatement(sqlQuery)) {
             for (int i = 0; i < parameters.getAmountOfEntries(); i++) {

@@ -24,28 +24,36 @@ import java.util.regex.Pattern;
 @Slf4j
 public class ConfigParser {
 
-    public Parameters parseConfig() {
-        Pattern p = Pattern.compile("(.*).(.*)");
+    // schema.table, both parts optionally double quoted: my-schema.my_table, "my-schema"."my_table"
+    private static final Pattern SCHEMA_TABLE_PATTERN =
+            Pattern.compile("^\"?[\\w-]+\"?\\.\"?[\\w-]+\"?$");
 
+    public Parameters parseConfig() {
         Parameters parameters = tryInitCLIParametersFromFile();
 
-        assert parameters != null;
+        // an empty yaml file is parsed into null by snakeyaml
+        if (parameters == null) {
+            throw new ConfigParsingException("Config file is empty, nothing to generate");
+        }
+
         if (parameters.isDebug()) {
             Logger rootLogger = (Logger) LoggerFactory.getLogger(ROOT_LOGGER_NAME);
             rootLogger.setLevel(Level.DEBUG);
             log.debug("Debug mode enabled");
         }
 
+        validateBatchParameters(parameters);
+
         List<String> tablesToGenerate = parameters.getTablesToGenerate();
 
-        if (tablesToGenerate != null || !tablesToGenerate.isEmpty()) {
-            for (int i = 0; i < tablesToGenerate.size(); i++) {
-                Matcher m = p.matcher(tablesToGenerate.get(i));
+        if (tablesToGenerate != null && !tablesToGenerate.isEmpty()) {
+            for (String schemaTable : tablesToGenerate) {
+                Matcher m = SCHEMA_TABLE_PATTERN.matcher(schemaTable);
 
-                if (!m.find()) {
+                if (!m.matches()) {
                     throw new ParametFormatException(
-                            "%s incorrect format, try using: \"my-schema\".table или my-schema.table"
-                                    .formatted(tablesToGenerate.get(i + 1)));
+                            "%s incorrect format, try using: \"my-schema\".table or my-schema.table"
+                                    .formatted(schemaTable));
                 }
             }
 
@@ -55,6 +63,22 @@ public class ConfigParser {
         }
 
         return parameters;
+    }
+
+    private void validateBatchParameters(Parameters parameters) {
+        Integer batch = parameters.getBatch();
+
+        if (batch == null || batch < 1) {
+            throw new ParametFormatException(
+                    "batch must be a positive number, but was: %s".formatted(batch));
+        }
+
+        Integer amountOfEntries = parameters.getAmountOfEntries();
+
+        if (amountOfEntries == null || amountOfEntries < 0) {
+            throw new ParametFormatException(
+                    "amountOfEntries must not be negative, but was: %s".formatted(amountOfEntries));
+        }
     }
 
     private Parameters tryInitCLIParametersFromFile() {
