@@ -6,6 +6,8 @@ amountOfEntries: 1_000_000 # an amount of entries to generate
 # - MULTI: via bulk multi inserts
 # - DEFAULT: if strategy field is not filled, just inserts
 strategy: DEFAULT
+batchSave: 1000 # rows per JDBC executeBatch in DEFAULT; does not commit the transaction
+batch: 1000 # rows per INSERT statement in MULTI; tune for the number of columns
 connectionParameters:
   host: localhost
   port: 5432

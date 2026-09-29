@@ -73,6 +73,12 @@ public class ConfigParser {
                     "batch must be a positive number, but was: %s".formatted(batch));
         }
 
+        Integer batchSave = parameters.getBatchSave();
+        if (batchSave == null || batchSave < 1) {
+            throw new ParametFormatException(
+                    "batchSave must be a positive number, but was: %s".formatted(batchSave));
+        }
+
         Integer amountOfEntries = parameters.getAmountOfEntries();
 
         if (amountOfEntries == null || amountOfEntries < 0) {

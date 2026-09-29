@@ -91,6 +91,20 @@ class ConfigParserTest {
     }
 
     @Test
+    void parseConfigRejectsInvalidBatchSave(@TempDir Path tempDir) throws IOException {
+        for (String value : new String[]{"0", "-1", "null"}) {
+            writeConfig(tempDir, "batchSave: " + value);
+            assertThrows(ParametFormatException.class, () -> new ConfigParser().parseConfig());
+        }
+    }
+
+    @Test
+    void parseConfigUsesDefaultBatchSave(@TempDir Path tempDir) throws IOException {
+        writeConfig(tempDir, "amountOfEntries: 0");
+        assertEquals(1000, new ConfigParser().parseConfig().getBatchSave());
+    }
+
+    @Test
     void parseConfigRejectsNegativeAmountOfEntries(@TempDir Path tempDir) throws IOException {
         writeConfig(tempDir, """
                 batch: 1

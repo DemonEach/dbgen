@@ -33,18 +33,21 @@ public class SimpleValuesInserter extends Inserter implements DataInserter {
         }
 
         String sqlQuery = this.generateInsertSqlTemplateString(sourceTable, fields);
+        int batchSize = parameters.getBatchSave();
         try (PreparedStatement preparedStatement = this.getConn().prepareStatement(sqlQuery)) {
             for (int i = 0; i < parameters.getAmountOfEntries(); i++) {
                 prepareDataForStatement(sourceTable, preparedStatement, fields, fieldReferenceValueMap);
                 preparedStatement.addBatch();
 
-                if (i % 100_000 == 0 && i > 0) {
+                if ((i + 1) % batchSize == 0) {
                     preparedStatement.executeBatch();
                     preparedStatement.clearBatch();
                 }
             }
 
-            preparedStatement.executeBatch();
+            if (parameters.getAmountOfEntries() % batchSize != 0) {
+                preparedStatement.executeBatch();
+            }
         }
     }
 
