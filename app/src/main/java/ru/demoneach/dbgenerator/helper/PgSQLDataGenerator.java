@@ -443,12 +443,21 @@ public class PgSQLDataGenerator {
 
         try (PreparedStatement preparedStatement = conn.prepareStatement(sqlQuery)) {
             preparedStatement.setInt(1, amountOfEntries);
-            preparedStatement.setFetchSize(100);
+            // higher than the small pre-P2.2 default: LIMIT can return up to amountOfEntries rows,
+            // and at scale the old fetchSize=100 meant thousands of extra client/server round trips
+            preparedStatement.setFetchSize(5000);
             ResultSet resultSet = preparedStatement.executeQuery();
 
+            // resolve column name -> index once: getObject(String) re-resolves the name on every
+            // call, which adds up once this loop runs amountOfEntries times
+            Map<Integer, Field> columnIndexToTargetField = new HashMap<>();
+            for (Field field : referenceFieldMap.keySet()) {
+                columnIndexToTargetField.put(resultSet.findColumn(field.getName()), referenceFieldMap.get(field));
+            }
+
             while (resultSet.next()) {
-                for (Field field : referenceFieldMap.keySet()) {
-                    linkedFields.get(referenceFieldMap.get(field)).add(resultSet.getObject(field.getName()));
+                for (Map.Entry<Integer, Field> entry : columnIndexToTargetField.entrySet()) {
+                    linkedFields.get(entry.getValue()).add(resultSet.getObject(entry.getKey()));
                 }
             }
         }

@@ -80,6 +80,7 @@ class PgSQLDataGeneratorForeignKeyTest {
                             yield true;
                         }
                         case "getObject" -> currentRow[0];
+                        case "findColumn" -> 1;
                         default -> throw new AssertionError("Unexpected ResultSet call: " + method.getName());
                     };
                 });

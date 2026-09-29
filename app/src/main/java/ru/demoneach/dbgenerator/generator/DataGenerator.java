@@ -36,15 +36,19 @@ public class DataGenerator {
 
     // TODO: make generation more SOLID
     public Object generateDataForField(String schemaTable, Field field) {
+        // CONST/LIST/RANGE fully replace the generated value, so skip generating (and for JSON/
+        // numeric, the extra object/BigInteger work) one that would just be thrown away.
+        if (ruleEnforcer.hasApplicableRule(schemaTable, field)) {
+            return ruleEnforcer.extractRuleValue(schemaTable, field);
+        }
+
         if (field.getNumericLimit() != null) {
             BigInteger unscaled;
             do {
                 unscaled = new BigInteger(field.getNumericLimit().bitLength(), random);
             } while (unscaled.compareTo(field.getNumericLimit()) >= 0);
             if (random.nextBoolean()) unscaled = unscaled.negate();
-            Object value = ruleEnforcer.extractRuleValueOrDefault(schemaTable, field,
-                    new BigDecimal(unscaled, field.getNumericScale()));
-            return value == null ? null : TypeConverterHelper.numericValue(field, (BigDecimal) value);
+            return TypeConverterHelper.numericValue(field, new BigDecimal(unscaled, field.getNumericScale()));
         }
         if (field.getDbType().equals(String.class)) {
             String str = this.generalGenerator.nextObject(String.class);
@@ -53,17 +57,16 @@ public class DataGenerator {
                 str = str.substring(0, field.getMaxLength() > str.length() ? str.length() : field.getMaxLength());
             }
 
-            return ruleEnforcer.extractRuleValueOrDefault(schemaTable, field, str);
+            return str;
         }
 
         // JSON handling: a random Map cannot be generated in a meaningful way,
         // so a dummy object is generated and serialized to json instead
         if (field.getDbType().equals(Map.class)) {
-            return ruleEnforcer.extractRuleValueOrDefault(
-                    schemaTable, field, this.generalGenerator.nextObject(DummyObject.class));
+            return this.generalGenerator.nextObject(DummyObject.class);
         }
 
-        return ruleEnforcer.extractRuleValueOrDefault(schemaTable, field, this.generalGenerator.nextObject(field.getDbType()));
+        return this.generalGenerator.nextObject(field.getDbType());
     }
 
     public static Object generateRandomValuesInRange(Object minBound, Object maxBound) throws IllegalArgumentException {

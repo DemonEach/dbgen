@@ -28,6 +28,20 @@ public class RuleEnforcer {
         return extractRuleValueOrDefault(schemaTable, field, null);
     }
 
+    // Lets callers skip generating a value they are about to discard: CONST/LIST/RANGE fully
+    // replace it, so there is no need to run EasyRandom (or the numeric/String generation path)
+    // first just to throw the result away. IGNORE is excluded: those fields are filtered out
+    // before generation (see filterIgnoredFields), so reaching this point with an IGNORE rule
+    // would be a bug elsewhere - falling through to normal generation is the safer default.
+    public boolean hasApplicableRule(String schemaTable, Field field) {
+        if (Objects.isNull(fieldGenerationRules) || fieldGenerationRules.isEmpty()) {
+            return false;
+        }
+
+        Rule rule = this.fieldGenerationRules.get(KEY_TEMPLATE.formatted(schemaTable, SqlIdentifiers.configPart(field.getName())));
+        return rule != null && rule.getValue() != null && rule.getRuleType() != RuleType.IGNORE;
+    }
+
     public Object extractRuleValueOrDefault(String schemaTable, Field field, Object defaultValue) {
         if (Objects.isNull(fieldGenerationRules) || fieldGenerationRules.isEmpty()) {
             return defaultValue;
