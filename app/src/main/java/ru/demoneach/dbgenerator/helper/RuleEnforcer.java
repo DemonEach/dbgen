@@ -73,6 +73,9 @@ public class RuleEnforcer {
     }
 
     public boolean checkIfFieldIgnored(Table table, Field field) {
+        if (field.isDatabaseGenerated()) return true;
+        if (field.hasDefault() && (fieldGenerationRules == null
+                || fieldGenerationRules.get(KEY_TEMPLATE.formatted(table, field.getName())) == null)) return true;
         if (field.getDbType().equals(Ignorable.class)) {
             return true;
         }

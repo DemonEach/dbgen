@@ -27,7 +27,7 @@ public class MultiValuesInserter extends Inserter implements DataInserter {
         List<Field> fields = this.getRuleEnforcer().filterIgnoredFields(sourceTable);
 
         if (fields.isEmpty()) {
-            log.warn("Table {} has no fields to generate, skipping it", sourceTable);
+            insertDefaultRows(sourceTable, parameters);
             return;
         }
 
@@ -72,6 +72,7 @@ public class MultiValuesInserter extends Inserter implements DataInserter {
                                             Integer batch) throws SQLException, JsonProcessingException {
         for (int i = 0; i < batch; i++) {
             for (Field field : fieldReferenceValueMap.keySet()) {
+                if (!fields.contains(field)) continue;
                 Integer queryParamId = (i * fields.size()) + fields.indexOf(field) + 1;
                 List<Object> fieldValues = fieldReferenceValueMap.get(field);
                 Object queryParamValue = fieldValues.remove(fieldValues.size() - 1);

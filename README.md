@@ -6,6 +6,7 @@ A cli tool to generate data for database
 
 - Java 21  
 - Gradle
+- PostgreSQL 12 or newer (identity and generated-column metadata is used)
 
 ### Currently supported databases
 
@@ -48,3 +49,23 @@ Both settings must be positive. They do not control transaction commits. Previou
 - `text[]` rules use a JSON array, e.g. `'["hello",null,""]'`.
 - FILE writes UTF-8 CSV. SQL NULL is an unquoted empty field; an empty string is
   quoted. Quotes, commas, line breaks and array elements are escaped for COPY.
+
+### Server-generated values
+
+All strategies omit serial, identity (ALWAYS and BY DEFAULT), and generated columns;
+PostgreSQL supplies their values. Generation rules do not override these columns.
+Ordinary columns with DEFAULT are also omitted unless a generation rule is supplied.
+Use CONST/LIST/RANGE to override an ordinary default, or IGNORE to keep it.
+
+If no input columns remain, all strategies use batched `INSERT ... DEFAULT VALUES`
+with `batchSave`, including FILE and MULTI. The requested number of rows is inserted;
+constraints such as NOT NULL still apply and failures roll back the generation.
+Existing sequences are never reset or repaired automatically.
+
+### PostgreSQL regression test
+
+`GeneratedColumnsPostgresTest` is enabled when `DBGEN_TEST_DATABASE` names a test
+database. Optional variables: `DBGEN_TEST_HOST` (localhost), `DBGEN_TEST_PORT` (5432),
+`DBGEN_TEST_USER` (postgres), `DBGEN_TEST_PASSWORD` (empty). Run `gradlew test`.
+The test creates a unique `dbgen_test_*` schema and drops that schema in cleanup.
+It checks repeated loads across all strategies and a regular insert afterwards.

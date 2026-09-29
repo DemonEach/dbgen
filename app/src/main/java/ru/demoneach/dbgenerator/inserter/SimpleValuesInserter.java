@@ -28,7 +28,7 @@ public class SimpleValuesInserter extends Inserter implements DataInserter {
         List<Field> fields = this.getRuleEnforcer().filterIgnoredFields(sourceTable);
 
         if (fields.isEmpty()) {
-            log.warn("Table {} has no fields to generate, skipping it", sourceTable);
+            insertDefaultRows(sourceTable, parameters);
             return;
         }
 

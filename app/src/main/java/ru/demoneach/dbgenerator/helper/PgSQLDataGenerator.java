@@ -33,6 +33,8 @@ public class PgSQLDataGenerator {
             SELECT
                 a.attname as "column",
                 pg_catalog.format_type(a.atttypid, a.atttypmod) as "type",
+                a.attidentity <> '' OR a.attgenerated <> '' AS is_generated,
+                a.atthasdef AS has_default,
                 CASE WHEN EXISTS (
                     SELECT 1
                     FROM pg_catalog.pg_depend d
@@ -122,14 +124,18 @@ public class PgSQLDataGenerator {
         this.dataInserter = dataInserter;
     }
 
-    private void extractTablesAndSchemas(Strategy strategy) throws SQLException {
+    private void extractTablesAndSchemas() throws SQLException {
         try (PreparedStatement statement = conn.prepareStatement(GET_DATABASE_STRUCTURE)) {
             ResultSet schemasAndTables = statement.executeQuery();
 
             while (schemasAndTables.next()) {
                 String schemaName = schemasAndTables.getString("schemaname");
                 String tableName = schemasAndTables.getString("tablename");
-                Map<String, String> tableFields = new LinkedHashMap<>();
+                Table table = new Table();
+                table.setSchema(schemaName);
+                table.setTableName(tableName);
+                List<Field> tableFields = new ArrayList<>();
+                table.setFields(tableFields);
                 conn.setSchema(schemaName);
 
                 try (PreparedStatement getTableFieldsStatement = conn.prepareStatement(GET_TABLE_STRUCTURE)) {
@@ -143,19 +149,14 @@ public class PgSQLDataGenerator {
                         String columnType = getTableFieldsResult.getString("type");
                         boolean isSerial = getTableFieldsResult.getBoolean("is_serial");
 
-                        // for DEFAULT and MULTI insertion the serial value can be ignored (the DB
-                        // fills it itself), but for FILE it has to be present in the CSV
-                        if (isSerial) {
-                            columnType = Strategy.FILE.equals(strategy)
-                                    ? "serial"
-                                    : TypeConverterHelper.IGNORED;
-                        }
-
-                        tableFields.put(columnName, columnType);
+                        Field field = new Field(columnName, columnType);
+                        field.setDatabaseGenerated(isSerial || getTableFieldsResult.getBoolean("is_generated"));
+                        field.setHasDefault(getTableFieldsResult.getBoolean("has_default"));
+                        tableFields.add(field);
                     }
                 }
 
-                this.databaseLayout.addTableVertex(schemaName, tableName, tableFields);
+                this.databaseLayout.getLayoutGraph().addVertex(table);
             }
         }
     }
@@ -204,7 +205,7 @@ public class PgSQLDataGenerator {
     }
 
     private void formDatabaseStructure(Parameters parameters) throws SQLException {
-        extractTablesAndSchemas(parameters.getStrategy());
+        extractTablesAndSchemas();
         excludeTablesThatAreNotRequired(parameters.getTablesToGenerate());
         makeLinksBetweenTables();
         addCustomLinksBetweenTables(parameters.getCustomTableLinks());

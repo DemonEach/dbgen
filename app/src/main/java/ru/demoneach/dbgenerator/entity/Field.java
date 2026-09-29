@@ -11,6 +11,13 @@ public class Field {
     private static final Pattern NUMERIC = Pattern.compile("(?:numeric|decimal)\\((\\d+)(?:,\\s*(-?\\d+))?\\)");
     private BigInteger numericLimit;
     private int numericScale;
+    private boolean databaseGenerated;
+    private boolean hasDefault;
+
+    public boolean isDatabaseGenerated() { return databaseGenerated; }
+    public void setDatabaseGenerated(boolean value) { databaseGenerated = value; }
+    public boolean hasDefault() { return hasDefault; }
+    public void setHasDefault(boolean value) { hasDefault = value; }
 
     public Field(String name, String dbType) {
         this.name = name;
