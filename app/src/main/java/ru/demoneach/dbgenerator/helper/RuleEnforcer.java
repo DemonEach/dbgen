@@ -33,7 +33,7 @@ public class RuleEnforcer {
             return defaultValue;
         }
 
-        Rule rule = this.fieldGenerationRules.get(KEY_TEMPLATE.formatted(schemaTable, field.getName()));
+        Rule rule = this.fieldGenerationRules.get(KEY_TEMPLATE.formatted(schemaTable, SqlIdentifiers.configPart(field.getName())));
 
         if (rule == null || rule.getValue() == null) {
             return defaultValue;
@@ -63,7 +63,7 @@ public class RuleEnforcer {
             return false;
         }
 
-        Rule rule = this.fieldGenerationRules.get(KEY_TEMPLATE.formatted(schemaTable, fieldName));
+        Rule rule = this.fieldGenerationRules.get(KEY_TEMPLATE.formatted(schemaTable, SqlIdentifiers.configPart(fieldName)));
 
         if (rule == null || rule.getRuleType() == null) {
             return false;
@@ -75,7 +75,7 @@ public class RuleEnforcer {
     public boolean checkIfFieldIgnored(Table table, Field field) {
         if (field.isDatabaseGenerated()) return true;
         if (field.hasDefault() && (fieldGenerationRules == null
-                || fieldGenerationRules.get(KEY_TEMPLATE.formatted(table, field.getName())) == null)) return true;
+                || fieldGenerationRules.get(KEY_TEMPLATE.formatted(table, SqlIdentifiers.configPart(field.getName()))) == null)) return true;
         if (field.getDbType().equals(Ignorable.class)) {
             return true;
         }

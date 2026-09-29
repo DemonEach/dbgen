@@ -7,6 +7,7 @@ import ru.demoneach.dbgenerator.entity.Parameters;
 import ru.demoneach.dbgenerator.generator.DataGenerator;
 import ru.demoneach.dbgenerator.helper.RuleEnforcer;
 
+import ru.demoneach.dbgenerator.helper.SqlIdentifiers;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
@@ -29,8 +30,7 @@ public abstract class Inserter {
     // fallback for all strategies and let PostgreSQL evaluate defaults per row.
     protected void insertDefaultRows(Table table, Parameters parameters) throws SQLException {
         if (parameters.getAmountOfEntries() == 0) return;
-        String sql = "INSERT INTO \"%s\".\"%s\" DEFAULT VALUES".formatted(
-                table.getSchema().replace("\"", "\"\""), table.getTableName().replace("\"", "\"\""));
+        String sql = "INSERT INTO " + SqlIdentifiers.qualified(table.getSchema(), table.getTableName()) + " DEFAULT VALUES";
         int batchSize = parameters.getBatchSave();
         try (PreparedStatement statement = conn.prepareStatement(sql)) {
             for (int row = 0; row < parameters.getAmountOfEntries(); row++) {

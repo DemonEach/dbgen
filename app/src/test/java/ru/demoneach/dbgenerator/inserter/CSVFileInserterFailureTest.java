@@ -25,10 +25,14 @@ class CSVFileInserterFailureTest {
         BaseConnection connection = connection();
         Table table = new Table();
         table.setSchema("public");
-        // The nonexistent parent directory makes file creation fail on all platforms.
+        // Special table names must never be used as filesystem paths.
         table.setTableName(UUID.randomUUID() + "/missing/table");
         table.setFieldsFromMap(Map.of("value", "integer"));
-        CSVFileInserter inserter = new CSVFileInserter(Map.of(), connection);
+        CSVFileInserter inserter = new CSVFileInserter(Map.of(), connection) {
+            @Override java.io.File createCsvFile() throws java.io.IOException {
+                throw new java.io.IOException("disk unavailable");
+            }
+        };
         UncheckedIOException failure = assertThrows(UncheckedIOException.class,
                 () -> inserter.generateAndInsert(table, new Parameters(), Map.of()));
         assertTrue(failure.getMessage().startsWith("Cannot write CSV file:"));

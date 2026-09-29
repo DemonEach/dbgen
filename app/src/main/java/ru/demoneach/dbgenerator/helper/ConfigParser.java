@@ -18,15 +18,14 @@ import java.io.*;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.Map;
+import java.util.LinkedHashMap;
+import ru.demoneach.dbgenerator.entity.Rule;
+
+
 
 @Slf4j
 public class ConfigParser {
-
-    // schema.table, both parts optionally double quoted: my-schema.my_table, "my-schema"."my_table"
-    private static final Pattern SCHEMA_TABLE_PATTERN =
-            Pattern.compile("^\"?[\\w-]+\"?\\.\"?[\\w-]+\"?$");
 
     public Parameters parseConfig() {
         Parameters parameters = tryInitCLIParametersFromFile();
@@ -47,21 +46,31 @@ public class ConfigParser {
         List<String> tablesToGenerate = parameters.getTablesToGenerate();
 
         if (tablesToGenerate != null && !tablesToGenerate.isEmpty()) {
-            for (String schemaTable : tablesToGenerate) {
-                Matcher m = SCHEMA_TABLE_PATTERN.matcher(schemaTable);
-
-                if (!m.matches()) {
-                    throw new ParametFormatException(
-                            "%s incorrect format, try using: \"my-schema\".table or my-schema.table"
-                                    .formatted(schemaTable));
-                }
-            }
+            parameters.setTablesToGenerate(tablesToGenerate.stream().map(name -> SqlIdentifiers.normalize(name, 2)).toList());
 
             log.info("Generation will be completed in tables: {}", tablesToGenerate);
         } else {
             log.warn("Generation will be done in ALL schemas for ALL tables!");
         }
 
+        if (parameters.getFieldGenerationRules() != null) {
+            Map<String, Rule> rules = new LinkedHashMap<>();
+            parameters.getFieldGenerationRules().forEach((key, rule) -> {
+                String normalized = SqlIdentifiers.normalize(key, 3);
+                if (rules.containsKey(normalized)) throw new ParametFormatException("Duplicate rule: " + key);
+                rules.put(normalized, rule);
+            });
+            parameters.setFieldGenerationRules(rules);
+        }
+        if (parameters.getCustomTableLinks() != null) {
+            Map<String, String> links = new LinkedHashMap<>();
+            parameters.getCustomTableLinks().forEach((key, value) -> {
+                String normalized = SqlIdentifiers.normalize(key, 3);
+                if (links.containsKey(normalized)) throw new ParametFormatException("Duplicate link: " + key);
+                links.put(normalized, SqlIdentifiers.normalize(value, 3));
+            });
+            parameters.setCustomTableLinks(links);
+        }
         return parameters;
     }
 

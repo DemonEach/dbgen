@@ -61,6 +61,7 @@ public class Table {
 
     @Override
     public String toString() {
-        return "%s.%s".formatted(schema, tableName);
+        return ru.demoneach.dbgenerator.helper.SqlIdentifiers.configPart(schema) + "."
+                + ru.demoneach.dbgenerator.helper.SqlIdentifiers.configPart(tableName);
     }
 }

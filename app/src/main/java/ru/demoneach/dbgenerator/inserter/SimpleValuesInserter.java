@@ -9,6 +9,7 @@ import ru.demoneach.dbgenerator.entity.Table;
 import ru.demoneach.dbgenerator.helper.TypeConverterHelper;
 
 import java.net.URISyntaxException;
+import ru.demoneach.dbgenerator.helper.SqlIdentifiers;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
@@ -68,7 +69,7 @@ public class SimpleValuesInserter extends Inserter implements DataInserter {
     }
 
     private String generateInsertSqlTemplateString(Table table, List<Field> fields) {
-        String sqlTemplateString = "INSERT INTO \"%s\".%s".formatted(table.getSchema(), table.getTableName());
+        String sqlTemplateString = "INSERT INTO " + SqlIdentifiers.qualified(table.getSchema(), table.getTableName());
 
         StringBuilder sb = new StringBuilder(sqlTemplateString);
         sb.append(" (");
@@ -77,7 +78,7 @@ public class SimpleValuesInserter extends Inserter implements DataInserter {
             if (this.getRuleEnforcer().checkIfFieldIgnored(table, field)) {
                 continue;
             }
-            sb.append(field.getName()).append(",");
+            sb.append(SqlIdentifiers.quote(field.getName())).append(",");
         }
 
         sb.setLength(sb.length() - 1);

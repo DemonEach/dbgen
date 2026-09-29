@@ -62,7 +62,20 @@ with `batchSave`, including FILE and MULTI. The requested number of rows is inse
 constraints such as NOT NULL still apply and failures roll back the generation.
 Existing sequences are never reset or repaired automatically.
 
-### PostgreSQL regression test
+### Identifier syntax
+
+Configuration names are exact and case-sensitive, including unquoted names (dbgen
+does not fold them to lowercase). Existing `my-schema.my_table` names remain valid.
+Quote a component containing spaces, dots or double quotes, and double embedded quotes:
+`'"My.Schema"."Table"."Column""Name"'` is a YAML key for a column rule.
+Use two components for `tablesToGenerate` and three for rules and custom links.
+Equivalent quoted/unquoted keys are normalized; duplicate rules/links are rejected.
+All SQL identifiers are double-quoted separately.
+
+FILE uses a temporary CSV with a generated filename, independent of table names.
+It is removed after COPY or a generation error; cleanup failures are logged.
+
+### Running the PostgreSQL regression test
 
 `GeneratedColumnsPostgresTest` is enabled when `DBGEN_TEST_DATABASE` names a test
 database. Optional variables: `DBGEN_TEST_HOST` (localhost), `DBGEN_TEST_PORT` (5432),

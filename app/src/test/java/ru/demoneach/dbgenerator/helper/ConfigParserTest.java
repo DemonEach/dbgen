@@ -131,6 +131,29 @@ class ConfigParserTest {
     }
 
     @Test
+    void normalizesRuleAndLinkNamesAndRejectsAliases(@TempDir Path tempDir) throws IOException {
+        writeConfig(tempDir, """
+                tablesToGenerate: ['"My.Schema"."Table"']
+                fieldGenerationRules:
+                  '"My.Schema"."Table"."a.b"':
+                    ruleType: CONST
+                    value: ['7']
+                customTableLinks:
+                  '"My.Schema"."Table"."a.b"': 'public."Parent".id'
+                """);
+        Parameters parameters = new ConfigParser().parseConfig();
+        String key = "\"My.Schema\".Table.\"a.b\"";
+        assertEquals(java.util.List.of("7"), parameters.getFieldGenerationRules().get(key).getValue());
+        assertEquals("public.Parent.id", parameters.getCustomTableLinks().get(key));
+        writeConfig(tempDir, """
+                fieldGenerationRules:
+                  public.t.id: {ruleType: CONST, value: ['1']}
+                  '"public".t.id': {ruleType: CONST, value: ['2']}
+                """);
+        assertThrows(ParametFormatException.class, () -> new ConfigParser().parseConfig());
+    }
+
+    @Test
     void parseConfigAcceptsQuotedSchemaAndTableName(@TempDir Path tempDir) throws IOException {
         writeConfig(tempDir, """
                 batch: 1
@@ -143,6 +166,6 @@ class ConfigParserTest {
 
         Parameters parameters = new ConfigParser().parseConfig();
 
-        assertEquals(1, parameters.getTablesToGenerate().size());
+        assertEquals(java.util.List.of("my-schema.my_table"), parameters.getTablesToGenerate());
     }
 }

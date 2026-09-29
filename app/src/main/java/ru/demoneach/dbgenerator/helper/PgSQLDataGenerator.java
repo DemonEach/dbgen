@@ -26,7 +26,7 @@ public class PgSQLDataGenerator {
 
     private static final String GET_DATABASE_STRUCTURE = """
             SELECT schemaname, tablename FROM pg_tables
-                WHERE schemaname NOT ILIKE '%pg_%' AND schemaname != 'information_schema'       
+                WHERE left(schemaname, 3) <> 'pg_' AND schemaname != 'information_schema'
             """;
 
     private static final String GET_TABLE_STRUCTURE = """
@@ -62,18 +62,20 @@ public class PgSQLDataGenerator {
             """;
 
     private static final String GET_REFERENCES_FOR_TABLE_AND_FIELDS = """
-            SELECT c.confrelid::regclass::text AS referenced_table
+            SELECT parent.relname AS referenced_table, ns.nspname AS referenced_schema
                   ,f.attname AS referenced_column
                   ,c.conname AS fk_name
                   ,pg_get_constraintdef(c.oid) AS fk_definition
                   ,a.attname
             FROM   pg_attribute  a 
             JOIN   pg_constraint c ON (c.conrelid, c.conkey[1]) = (a.attrelid, a.attnum)
+            JOIN   pg_class parent ON parent.oid = c.confrelid
+            JOIN   pg_namespace ns ON ns.oid = parent.relnamespace
             JOIN   pg_attribute  f ON f.attrelid = c.confrelid
                                   AND f.attnum = ANY (confkey)
             WHERE  a.attrelid = ?::regclass   -- table name 
             AND    c.contype  = 'f'
-            GROUP  BY c.confrelid, c.conname, c.oid, a.attname, f.attname;
+            GROUP  BY c.confrelid, c.conname, c.oid, a.attname, f.attname, parent.relname, ns.nspname;
             """;
 
     public PgSQLDataGenerator(Parameters parameters) throws Exception {
@@ -167,16 +169,17 @@ public class PgSQLDataGenerator {
             // TODO: it would be nice to account for other constraints, i.e "unique"
             try (PreparedStatement getReferencesStatement = conn.prepareStatement(GET_REFERENCES_FOR_TABLE_AND_FIELDS)) {
                 conn.setSchema(table.getSchema());
-                getReferencesStatement.setString(1, "%s.%s".formatted(table.getSchema(), table.getTableName()));
+                getReferencesStatement.setString(1, SqlIdentifiers.qualified(table.getSchema(), table.getTableName()));
 
                 ResultSet references = getReferencesStatement.executeQuery();
                 while (Objects.nonNull(references) && references.next()) {
                     String referencedTableName = references.getString("referenced_table");
+                    String referencedSchema = references.getString("referenced_schema");
                     String referencedColumn = references.getString("referenced_column");
                     String attributeName = references.getString("attname");
 
                     Table referencedTable = verticies.stream()
-                            .filter(t -> t.getTableName().equalsIgnoreCase(referencedTableName))
+                            .filter(t -> t.getTableName().equals(referencedTableName) && t.getSchema().equals(referencedSchema))
                             .findFirst()
                             .orElse(null);
 
@@ -185,12 +188,12 @@ public class PgSQLDataGenerator {
                     }
 
                     Field referencedFieldOrigTable = referencedTable.getFields().stream()
-                            .filter(f -> f.getName().equalsIgnoreCase(referencedColumn))
+                            .filter(f -> f.getName().equals(referencedColumn))
                             .findFirst()
                             .orElse(null);
 
                     Field referenceFieldCurrentTable = table.getFields().stream()
-                            .filter(f -> f.getName().equalsIgnoreCase(attributeName))
+                            .filter(f -> f.getName().equals(attributeName))
                             .findFirst()
                             .orElse(null);
 
@@ -225,11 +228,13 @@ public class PgSQLDataGenerator {
         }
 
         for (Map.Entry<String, String> tableLink : tablesLinkMap.entrySet()) {
+            List<String> sourceName = SqlIdentifiers.parse(tableLink.getKey(), 3);
+            List<String> targetName = SqlIdentifiers.parse(tableLink.getValue(), 3);
             Table origTable = this.databaseLayout
                     .getLayoutGraph()
                     .vertexSet()
                     .stream()
-                    .filter(t -> tableLink.getKey().contains(t.toString()))
+                    .filter(t -> sourceName.get(0).equals(t.getSchema()) && sourceName.get(1).equals(t.getTableName()))
                     .findFirst()
                     .orElse(null);
 
@@ -237,23 +242,23 @@ public class PgSQLDataGenerator {
                     .getLayoutGraph()
                     .vertexSet()
                     .stream()
-                    .filter(t -> tableLink.getValue().contains(t.toString()))
+                    .filter(t -> targetName.get(0).equals(t.getSchema()) && targetName.get(1).equals(t.getTableName()))
                     .findFirst()
                     .orElse(null);
 
             assert origTable != null : "Cannot find source table %s".formatted(tableLink.getKey());
             assert referencedTable != null : "Cannot find referenced table %s".formatted(tableLink.getValue());
 
-            String origColumnName = tableLink.getKey().split("\\.")[2];
-            String refColumnName = tableLink.getValue().split("\\.")[2];
+            String origColumnName = sourceName.get(2);
+            String refColumnName = targetName.get(2);
 
             Field referencedFieldOrigTable = referencedTable.getFields().stream()
-                    .filter(f -> f.getName().equalsIgnoreCase(refColumnName))
+                    .filter(f -> f.getName().equals(refColumnName))
                     .findFirst()
                     .orElse(null);
 
             Field referenceFieldCurrentTable = origTable.getFields().stream()
-                    .filter(f -> f.getName().equalsIgnoreCase(origColumnName))
+                    .filter(f -> f.getName().equals(origColumnName))
                     .findFirst()
                     .orElse(null);
 
@@ -372,8 +377,8 @@ public class PgSQLDataGenerator {
     }
 
     private Map<Field, List<Object>> extractLinkedField(Table sourceTable, Map<Field, Field> referenceFieldMap) throws SQLException {
-        String sqlFields = String.join(",", referenceFieldMap.keySet().stream().map(Field::getName).toArray(String[]::new));
-        String sqlQuery = "SELECT %s FROM %s".formatted(sqlFields, sourceTable.getTableName());
+        String sqlFields = referenceFieldMap.keySet().stream().map(field -> SqlIdentifiers.quote(field.getName())).collect(Collectors.joining(","));
+        String sqlQuery = "SELECT %s FROM %s".formatted(sqlFields, SqlIdentifiers.qualified(sourceTable.getSchema(), sourceTable.getTableName()));
         Map<Field, List<Object>> linkedFields = referenceFieldMap.values().stream().collect(Collectors.toMap(
                 field -> field,
                 value -> new ArrayList<>()
