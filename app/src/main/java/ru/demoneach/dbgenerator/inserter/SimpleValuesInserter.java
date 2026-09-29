@@ -58,8 +58,7 @@ public class SimpleValuesInserter extends Inserter implements DataInserter {
             Object generatedObject;
 
             if (fieldReferenceValueMap.containsKey(fields.get(i))) {
-                List<Object> fieldValues = fieldReferenceValueMap.get(fields.get(i));
-                generatedObject = fieldValues.remove(fieldValues.size() - 1);
+                generatedObject = nextReferencedValue(table, fields.get(i), fieldReferenceValueMap.get(fields.get(i)));
             } else {
                 generatedObject = this.getDataGenerator().generateDataForField(table.toString(), fields.get(i));
             }

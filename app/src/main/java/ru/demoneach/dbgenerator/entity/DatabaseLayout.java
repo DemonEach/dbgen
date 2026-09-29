@@ -6,6 +6,7 @@ import com.mxgraph.util.mxCellRenderer;
 import org.jgrapht.Graph;
 import org.jgrapht.ext.JGraphXAdapter;
 import org.jgrapht.graph.DefaultDirectedGraph;
+import ru.demoneach.dbgenerator.exception.DataGenerationException;
 
 import javax.imageio.ImageIO;
 import java.awt.*;
@@ -17,6 +18,8 @@ import java.util.*;
 public class DatabaseLayout {
 
     Graph<Table, ReferenceEdge> layoutGraph;
+    // null means "generate every table in the graph" (no tablesToGenerate filter was applied)
+    private Set<Table> generationTargets;
 
     public DatabaseLayout() {
         this.layoutGraph = new DefaultDirectedGraph<>(ReferenceEdge.class);
@@ -34,11 +37,23 @@ public class DatabaseLayout {
     public void addTableEdge(Table referencedTable, Table currentTable, Map<Field, Field> referenceFieldMap) {
         ReferenceEdge referenceEdge = new ReferenceEdge(referenceFieldMap);
 
-        if (this.layoutGraph.containsEdge(referenceEdge)) {
-            return;
+        // the underlying graph is not a multigraph: a second edge between the same pair of
+        // tables (several FKs on one pair, or a custom link duplicating a real FK) is silently
+        // dropped by addEdge() instead of being generated for. Fail loudly until this is supported.
+        if (!this.layoutGraph.addEdge(referencedTable, currentTable, referenceEdge)) {
+            ReferenceEdge existing = this.layoutGraph.getEdge(referencedTable, currentTable);
+            throw new DataGenerationException(
+                    "Multiple foreign keys between %s and %s are not supported yet. Existing link:\n%sNew link:\n%s"
+                            .formatted(referencedTable, currentTable, existing, referenceEdge));
         }
+    }
 
-        this.layoutGraph.addEdge(referencedTable, currentTable, referenceEdge);
+    public void setGenerationTargets(Set<Table> generationTargets) {
+        this.generationTargets = generationTargets;
+    }
+
+    public boolean isGenerationTarget(Table table) {
+        return generationTargets == null || generationTargets.contains(table);
     }
 
     public void printGraph() throws IOException {

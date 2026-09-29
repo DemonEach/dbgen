@@ -1,8 +1,10 @@
 package ru.demoneach.dbgenerator.inserter;
 
 import org.junit.jupiter.api.Test;
+import ru.demoneach.dbgenerator.entity.Field;
 import ru.demoneach.dbgenerator.entity.Parameters;
 import ru.demoneach.dbgenerator.entity.Table;
+import ru.demoneach.dbgenerator.exception.DataGenerationException;
 
 import java.lang.reflect.Proxy;
 import java.sql.Connection;
@@ -12,6 +14,8 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SimpleValuesInserterTest {
     @Test
@@ -62,5 +66,39 @@ class SimpleValuesInserterTest {
         new SimpleValuesInserter(Map.of(), connection).generateAndInsert(table, parameters, Map.of());
         assertEquals(expected, batches);
         assertEquals(0, pending[0]);
+    }
+
+    @Test
+    void exhaustedReferencedValuesFailWithAClearDiagnostic() {
+        PreparedStatement statement = (PreparedStatement) Proxy.newProxyInstance(
+                getClass().getClassLoader(), new Class<?>[]{PreparedStatement.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "close" -> null;
+                    default -> throw new AssertionError("Unexpected JDBC call: " + method.getName());
+                });
+        Connection connection = (Connection) Proxy.newProxyInstance(
+                getClass().getClassLoader(), new Class<?>[]{Connection.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "prepareStatement" -> statement;
+                    case "setSchema" -> null;
+                    default -> throw new AssertionError("Unexpected JDBC call: " + method.getName());
+                });
+
+        Table table = new Table();
+        table.setSchema("public");
+        table.setTableName("child");
+        table.setFieldsFromMap(Map.of("parent_id", "integer"));
+        Field parentId = table.getFields().get(0);
+
+        Parameters parameters = new Parameters();
+        parameters.setAmountOfEntries(1);
+
+        // the referenced (parent) table produced fewer rows than requested here; failing loudly
+        // beats an IndexOutOfBoundsException from ArrayList.remove(-1) with no context
+        DataGenerationException failure = assertThrows(DataGenerationException.class, () ->
+                new SimpleValuesInserter(Map.of(), connection)
+                        .generateAndInsert(table, parameters, Map.of(parentId, new ArrayList<>())));
+        assertTrue(failure.getMessage().contains("child"));
+        assertTrue(failure.getMessage().contains("parent_id"));
     }
 }

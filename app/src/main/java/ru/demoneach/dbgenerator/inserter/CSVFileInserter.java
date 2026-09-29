@@ -98,8 +98,7 @@ public class CSVFileInserter extends Inserter implements DataInserter {
             if (i > 0) row.append(',');
             Object value;
             if (fieldReferenceValueMap.containsKey(field)) {
-                List<Object> values = fieldReferenceValueMap.get(field);
-                value = values.remove(values.size() - 1);
+                value = nextReferencedValue(table, field, fieldReferenceValueMap.get(field));
             } else if (field.getDbType().equals(SequentialPositive.class)) {
                 value = positiveSeq;
             } else {

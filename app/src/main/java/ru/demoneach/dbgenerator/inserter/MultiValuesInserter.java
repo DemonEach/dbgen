@@ -59,7 +59,7 @@ public class MultiValuesInserter extends Inserter implements DataInserter {
             for (int i = 0; i < timesToExecute; i++) {
                 prepareDataForStatementForMultipleValues(sourceTable, preparedStatement, fields, batch);
                 if (Objects.nonNull(fieldReferenceValueMap) && !fieldReferenceValueMap.isEmpty()) {
-                    setReferencedFieldFromList(preparedStatement, fields, fieldReferenceValueMap, batch);
+                    setReferencedFieldFromList(sourceTable, preparedStatement, fields, fieldReferenceValueMap, batch);
                 }
 
                 preparedStatement.execute();
@@ -67,7 +67,8 @@ public class MultiValuesInserter extends Inserter implements DataInserter {
         }
     }
 
-    private void setReferencedFieldFromList(PreparedStatement preparedStatement,
+    private void setReferencedFieldFromList(Table table,
+                                            PreparedStatement preparedStatement,
                                             List<Field> fields,
                                             Map<Field, List<Object>> fieldReferenceValueMap,
                                             Integer batch) throws SQLException, JsonProcessingException {
@@ -75,8 +76,7 @@ public class MultiValuesInserter extends Inserter implements DataInserter {
             for (Field field : fieldReferenceValueMap.keySet()) {
                 if (!fields.contains(field)) continue;
                 Integer queryParamId = (i * fields.size()) + fields.indexOf(field) + 1;
-                List<Object> fieldValues = fieldReferenceValueMap.get(field);
-                Object queryParamValue = fieldValues.remove(fieldValues.size() - 1);
+                Object queryParamValue = nextReferencedValue(table, field, fieldReferenceValueMap.get(field));
                 TypeConverterHelper.setCorrectDbTypeOfObject(preparedStatement, queryParamId, field, queryParamValue, this.getConn());
             }
         }

@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.jgrapht.Graph;
 import ru.demoneach.dbgenerator.entity.*;
 import ru.demoneach.dbgenerator.exception.ConfigParsingException;
+import ru.demoneach.dbgenerator.exception.DataGenerationException;
 import ru.demoneach.dbgenerator.inserter.CSVFileInserter;
 import ru.demoneach.dbgenerator.inserter.DataInserter;
 import ru.demoneach.dbgenerator.inserter.MultiValuesInserter;
@@ -65,17 +66,16 @@ public class PgSQLDataGenerator {
             SELECT parent.relname AS referenced_table, ns.nspname AS referenced_schema
                   ,f.attname AS referenced_column
                   ,c.conname AS fk_name
-                  ,pg_get_constraintdef(c.oid) AS fk_definition
                   ,a.attname
-            FROM   pg_attribute  a 
-            JOIN   pg_constraint c ON (c.conrelid, c.conkey[1]) = (a.attrelid, a.attnum)
+                  ,cardinality(c.conkey) AS fk_column_count
+            FROM   pg_constraint c
+            JOIN   pg_attribute  a ON (c.conrelid, c.conkey[1]) = (a.attrelid, a.attnum)
             JOIN   pg_class parent ON parent.oid = c.confrelid
             JOIN   pg_namespace ns ON ns.oid = parent.relnamespace
             JOIN   pg_attribute  f ON f.attrelid = c.confrelid
-                                  AND f.attnum = ANY (confkey)
-            WHERE  a.attrelid = ?::regclass   -- table name 
-            AND    c.contype  = 'f'
-            GROUP  BY c.confrelid, c.conname, c.oid, a.attname, f.attname, parent.relname, ns.nspname;
+                                  AND f.attnum = c.confkey[1]
+            WHERE  c.conrelid = ?::regclass   -- table name
+            AND    c.contype  = 'f';
             """;
 
     public PgSQLDataGenerator(Parameters parameters) throws Exception {
@@ -163,55 +163,102 @@ public class PgSQLDataGenerator {
         }
     }
 
-    private void makeLinksBetweenTables() throws SQLException {
-        Set<Table> verticies = this.databaseLayout.getLayoutGraph().vertexSet();
-        for (Table table : verticies) {
-            // TODO: it would be nice to account for other constraints, i.e "unique"
-            try (PreparedStatement getReferencesStatement = conn.prepareStatement(GET_REFERENCES_FOR_TABLE_AND_FIELDS)) {
-                conn.setSchema(table.getSchema());
-                getReferencesStatement.setString(1, SqlIdentifiers.qualified(table.getSchema(), table.getTableName()));
+    // Returns the FK parent tables found for `table` (querying pg_constraint) after adding the
+    // corresponding graph edges, so the caller can keep walking the FK graph outward from them.
+    private List<Table> queryForeignKeyParents(Table table, Set<Table> verticies) throws SQLException {
+        List<Table> discoveredParents = new ArrayList<>();
+        // TODO: it would be nice to account for other constraints, i.e "unique"
+        try (PreparedStatement getReferencesStatement = conn.prepareStatement(GET_REFERENCES_FOR_TABLE_AND_FIELDS)) {
+            conn.setSchema(table.getSchema());
+            getReferencesStatement.setString(1, SqlIdentifiers.qualified(table.getSchema(), table.getTableName()));
 
-                ResultSet references = getReferencesStatement.executeQuery();
-                while (Objects.nonNull(references) && references.next()) {
-                    String referencedTableName = references.getString("referenced_table");
-                    String referencedSchema = references.getString("referenced_schema");
-                    String referencedColumn = references.getString("referenced_column");
-                    String attributeName = references.getString("attname");
-
-                    Table referencedTable = verticies.stream()
-                            .filter(t -> t.getTableName().equals(referencedTableName) && t.getSchema().equals(referencedSchema))
-                            .findFirst()
-                            .orElse(null);
-
-                    if (Objects.isNull(referencedTable)) {
-                        continue;
-                    }
-
-                    Field referencedFieldOrigTable = referencedTable.getFields().stream()
-                            .filter(f -> f.getName().equals(referencedColumn))
-                            .findFirst()
-                            .orElse(null);
-
-                    Field referenceFieldCurrentTable = table.getFields().stream()
-                            .filter(f -> f.getName().equals(attributeName))
-                            .findFirst()
-                            .orElse(null);
-
-                    if (Objects.isNull(referencedFieldOrigTable) || Objects.isNull(referenceFieldCurrentTable)) {
-                        continue;
-                    }
-
-                    this.databaseLayout.addTableEdge(referencedTable, table, Map.of(referencedFieldOrigTable, referenceFieldCurrentTable));
+            ResultSet references = getReferencesStatement.executeQuery();
+            while (Objects.nonNull(references) && references.next()) {
+                String fkName = references.getString("fk_name");
+                int fkColumnCount = references.getInt("fk_column_count");
+                if (fkColumnCount != 1) {
+                    throw new DataGenerationException(
+                            "Composite foreign key %s on %s references %d columns; composite FKs are not supported yet"
+                                    .formatted(fkName, table, fkColumnCount));
                 }
+
+                String referencedTableName = references.getString("referenced_table");
+                String referencedSchema = references.getString("referenced_schema");
+                String referencedColumn = references.getString("referenced_column");
+                String attributeName = references.getString("attname");
+
+                Table referencedTable = verticies.stream()
+                        .filter(t -> t.getTableName().equals(referencedTableName) && t.getSchema().equals(referencedSchema))
+                        .findFirst()
+                        .orElse(null);
+
+                if (Objects.isNull(referencedTable)) {
+                    continue;
+                }
+
+                Field referencedFieldOrigTable = referencedTable.getFields().stream()
+                        .filter(f -> f.getName().equals(referencedColumn))
+                        .findFirst()
+                        .orElse(null);
+
+                Field referenceFieldCurrentTable = table.getFields().stream()
+                        .filter(f -> f.getName().equals(attributeName))
+                        .findFirst()
+                        .orElse(null);
+
+                if (Objects.isNull(referencedFieldOrigTable) || Objects.isNull(referenceFieldCurrentTable)) {
+                    continue;
+                }
+
+                this.databaseLayout.addTableEdge(referencedTable, table, Map.of(referencedFieldOrigTable, referenceFieldCurrentTable));
+                discoveredParents.add(referencedTable);
             }
+        }
+        return discoveredParents;
+    }
+
+    // Discovers the FK graph. When tablesToGenerate restricts the run, only the requested tables
+    // and their FK parents - direct, transitive, or reached through a customTableLinks edge - are
+    // queried and kept; every other table (including ones with an FK shape this tool does not
+    // support yet, such as a composite key) is left alone instead of blocking the run.
+    private void discoverForeignKeyGraph(List<String> requiredTables) throws SQLException {
+        Graph<Table, ReferenceEdge> graph = this.databaseLayout.getLayoutGraph();
+        Set<Table> verticies = graph.vertexSet();
+        boolean scoped = requiredTables != null && !requiredTables.isEmpty();
+
+        Set<Table> generationTargets = scoped
+                ? verticies.stream().filter(t -> requiredTables.contains(t.toString())).collect(Collectors.toSet())
+                : Set.copyOf(verticies);
+        Set<Table> visited = new HashSet<>(generationTargets);
+        Deque<Table> toVisit = new ArrayDeque<>(generationTargets);
+
+        while (!toVisit.isEmpty()) {
+            Table table = toVisit.poll();
+            // a parent already linked through a customTableLinks edge still needs to be visited
+            // itself, so its own FK parents are not missed
+            for (ReferenceEdge edge : graph.incomingEdgesOf(table)) {
+                Table parent = graph.getEdgeSource(edge);
+                if (visited.add(parent)) toVisit.add(parent);
+            }
+            for (Table parent : queryForeignKeyParents(table, verticies)) {
+                if (visited.add(parent)) toVisit.add(parent);
+            }
+        }
+
+        if (scoped) {
+            Set<Table> verticesToRemove = verticies.stream().filter(t -> !visited.contains(t)).collect(Collectors.toSet());
+            graph.removeAllVertices(verticesToRemove);
+            this.databaseLayout.setGenerationTargets(generationTargets);
         }
     }
 
     private void formDatabaseStructure(Parameters parameters) throws SQLException {
         extractTablesAndSchemas();
-        excludeTablesThatAreNotRequired(parameters.getTablesToGenerate());
-        makeLinksBetweenTables();
+        // Custom links only need the vertices (already all loaded above) and are cheap, so they
+        // are added first; discoverForeignKeyGraph() then also walks them when deciding which
+        // tables need their FKs queried.
         addCustomLinksBetweenTables(parameters.getCustomTableLinks());
+        discoverForeignKeyGraph(parameters.getTablesToGenerate());
 
         if (log.isDebugEnabled()) {
             try {
@@ -222,7 +269,9 @@ public class PgSQLDataGenerator {
         }
     }
 
-    private void addCustomLinksBetweenTables(Map<String, String> tablesLinkMap) {
+    // package-private for PgSQLDataGeneratorCustomLinksTest: exercising it does not need a
+    // live Connection, only a pre-populated DatabaseLayout, so there is no DB-mocking seam for it.
+    void addCustomLinksBetweenTables(Map<String, String> tablesLinkMap) {
         if (tablesLinkMap == null || tablesLinkMap.isEmpty()) {
             return;
         }
@@ -246,8 +295,12 @@ public class PgSQLDataGenerator {
                     .findFirst()
                     .orElse(null);
 
-            assert origTable != null : "Cannot find source table %s".formatted(tableLink.getKey());
-            assert referencedTable != null : "Cannot find referenced table %s".formatted(tableLink.getValue());
+            if (origTable == null) {
+                throw new DataGenerationException("customTableLinks: cannot find source table %s".formatted(tableLink.getKey()));
+            }
+            if (referencedTable == null) {
+                throw new DataGenerationException("customTableLinks: cannot find referenced table %s".formatted(tableLink.getValue()));
+            }
 
             String origColumnName = sourceName.get(2);
             String refColumnName = targetName.get(2);
@@ -266,7 +319,10 @@ public class PgSQLDataGenerator {
                 continue;
             }
 
-            this.databaseLayout.addTableEdge(origTable, referencedTable, Map.of(referenceFieldCurrentTable, referencedFieldOrigTable));
+            // edge must run parent -> child, same as the automatically detected FKs above:
+            // origTable is the table that holds the referencing column (the child), referencedTable
+            // is the table whose column is referenced (the parent) and must be generated first.
+            this.databaseLayout.addTableEdge(referencedTable, origTable, Map.of(referencedFieldOrigTable, referenceFieldCurrentTable));
         }
     }
 
@@ -292,6 +348,11 @@ public class PgSQLDataGenerator {
                 List<Table> sortedTables = topologicalSort(graph);
 
                 for (Table table : sortedTables) {
+                    if (!this.databaseLayout.isGenerationTarget(table)) {
+                        log.info("Skipping {}: outside tablesToGenerate, used only as an existing FK reference", table);
+                        continue;
+                    }
+
                     log.info("Starting generation for table: {}", table);
                     Map<Field, List<Object>> fieldValuesMap = new HashMap<>();
                     Set<ReferenceEdge> edges = graph.edgesOf(table);
@@ -318,18 +379,6 @@ public class PgSQLDataGenerator {
                 throw failure;
             }
         }
-    }
-
-    private void excludeTablesThatAreNotRequired(List<String> requiredTables) {
-        if (requiredTables == null || requiredTables.isEmpty()) {
-            return;
-        }
-
-        Set<Table> verticesToRemove = this.databaseLayout.getLayoutGraph().vertexSet()
-                .stream()
-                .filter(t -> !requiredTables.contains(t.toString()))
-                .collect(Collectors.toSet());
-        this.databaseLayout.getLayoutGraph().removeAllVertices(verticesToRemove);
     }
 
     private List<Table> topologicalSort(Graph<Table, ReferenceEdge> graph) {
