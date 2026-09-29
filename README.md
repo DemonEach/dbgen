@@ -28,13 +28,19 @@ The configuration is read from the working directory first, then from the jar di
 
 ### Insert batch sizes
 
-- `DEFAULT`: `batchSave` controls rows per JDBC `executeBatch()` (default: 1000).
-- `MULTI`: `batch` controls rows per multi-value INSERT (default: 1).
+- `DEFAULT`: `batchSave` controls rows per JDBC `executeBatch()` (default: 1000). The
+  connection also sets the PostgreSQL JDBC driver's `reWriteBatchedInserts=true`, which folds
+  a batch into multi-row `INSERT` statements.
+- `MULTI`: `batch` controls rows per multi-value INSERT (default: 1000). At `batch: 1` every
+  row is its own statement with no JDBC-level batching; a pilot benchmark measured this as
+  roughly 30x slower than `DEFAULT`/`FILE` at 100k rows (`bench/results/pilot-*.csv`).
 - `FILE`: neither setting affects COPY.
 
 Both settings must be positive. They do not control transaction commits. Previously
-`batchSave` was ignored and DEFAULT queued about 100,000 rows at a time. Start with
-1000 and measure on your schema; this is a starting point, not a measured optimum.
+`batchSave` was ignored and DEFAULT queued about 100,000 rows at a time. 1000 is a pilot
+benchmark starting point for both settings (see `bench/`), not a proven optimum for every
+schema — measure on yours, especially for wide tables where more columns means more bind
+parameters per statement.
 
 ### Data formats
 

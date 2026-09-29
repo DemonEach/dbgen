@@ -26,6 +26,7 @@ dependencies {
 
     implementation 'org.postgresql:postgresql:42.7.5'
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.18.3'
+    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.18.3'
     implementation 'ch.qos.logback:logback-classic:1.5.17'
     implementation 'org.jeasy:easy-random-core:5.0.0'
     implementation 'org.jgrapht:jgrapht-core:1.5.2'

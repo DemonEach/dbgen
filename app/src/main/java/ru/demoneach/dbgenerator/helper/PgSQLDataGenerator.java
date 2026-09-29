@@ -89,6 +89,9 @@ public class PgSQLDataGenerator {
         Properties props = new Properties();
         props.setProperty("user", connectionParameters.getUsername());
         props.setProperty("password", connectionParameters.getPassword());
+        // lets the driver fold a JDBC executeBatch() of INSERTs into multi-row statements;
+        // only DEFAULT (SimpleValuesInserter) uses executeBatch, see bench/results for measurements
+        props.setProperty("reWriteBatchedInserts", "true");
 
         this.conn = DriverManager.getConnection(url, props);
         try {

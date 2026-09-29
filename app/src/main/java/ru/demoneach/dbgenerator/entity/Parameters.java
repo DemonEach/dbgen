@@ -12,7 +12,7 @@ import java.util.Map;
 @ToString
 public class Parameters {
     private boolean debug = false;
-    private Integer batch = 1;
+    private Integer batch = 1000;
     private Integer batchSave = 1000;
     private Strategy strategy = Strategy.DEFAULT;
     // a list of tables with schemas with format: schema.table
