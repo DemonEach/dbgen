@@ -13,4 +13,8 @@ public class PrettyJsonLogger {
     public static String asDefaultString(Object obj) throws JsonProcessingException {
         return objectMapper.writeValueAsString(obj);
     }
+
+    public static String[] parseStringArray(String json) throws JsonProcessingException {
+        return objectMapper.readValue(json, String[].class);
+    }
 }

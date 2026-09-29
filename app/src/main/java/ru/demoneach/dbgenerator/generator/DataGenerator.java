@@ -7,6 +7,9 @@ import ru.demoneach.dbgenerator.entity.Field;
 import ru.demoneach.dbgenerator.helper.RuleEnforcer;
 
 import java.time.Instant;
+import java.math.BigDecimal;
+import java.math.BigInteger;
+import ru.demoneach.dbgenerator.helper.TypeConverterHelper;
 import java.util.Map;
 import java.util.Random;
 
@@ -33,6 +36,16 @@ public class DataGenerator {
 
     // TODO: make generation more SOLID
     public Object generateDataForField(String schemaTable, Field field) {
+        if (field.getNumericLimit() != null) {
+            BigInteger unscaled;
+            do {
+                unscaled = new BigInteger(field.getNumericLimit().bitLength(), random);
+            } while (unscaled.compareTo(field.getNumericLimit()) >= 0);
+            if (random.nextBoolean()) unscaled = unscaled.negate();
+            Object value = ruleEnforcer.extractRuleValueOrDefault(schemaTable, field,
+                    new BigDecimal(unscaled, field.getNumericScale()));
+            return value == null ? null : TypeConverterHelper.numericValue(field, (BigDecimal) value);
+        }
         if (field.getDbType().equals(String.class)) {
             String str = this.generalGenerator.nextObject(String.class);
 
@@ -59,6 +72,13 @@ public class DataGenerator {
         }
 
         return switch (minBound.getClass()) {
+            case Class c when BigDecimal.class.equals(c) -> {
+                BigDecimal min = (BigDecimal) minBound;
+                BigDecimal max = (BigDecimal) maxBound;
+                if (min.compareTo(max) > 0) throw new IllegalArgumentException("numeric RANGE min exceeds max");
+                if (min.compareTo(max) == 0) yield min;
+                yield min.add(max.subtract(min).multiply(BigDecimal.valueOf(random.nextDouble())));
+            }
             case Class c when Integer.class.equals(c) ->
                     random.nextInt((Integer) maxBound - (Integer) minBound) + (Integer) minBound;
             case Class c when Double.class.equals(c) ->

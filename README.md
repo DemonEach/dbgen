@@ -34,3 +34,17 @@ The configuration is read from the working directory first, then from the jar di
 Both settings must be positive. They do not control transaction commits. Previously
 `batchSave` was ignored and DEFAULT queued about 100,000 rows at a time. Start with
 1000 and measure on your schema; this is a starting point, not a measured optimum.
+
+### Data formats
+
+- `numeric(p,s)` is generated within the declared precision and scale. Rule values
+  are rounded to the scale (half away from zero); overflow raises an error.
+- Timestamp precision from 0 to 6 is recognized; PostgreSQL applies the declared
+  timestamp precision when storing the value.
+- In `CONST`/`LIST`, a YAML null element produces SQL NULL; a quoted `"null"` is text.
+- JSONB rules contain JSON text, e.g. `'{"active":true}'`; generated objects are
+  serialized as JSON. PostgreSQL validates rule JSON during insertion.
+- `bytea` rules use hex, e.g. `'\x0001ff'`. JDBC writes the raw bytes.
+- `text[]` rules use a JSON array, e.g. `'["hello",null,""]'`.
+- FILE writes UTF-8 CSV. SQL NULL is an unquoted empty field; an empty string is
+  quoted. Quotes, commas, line breaks and array elements are escaped for COPY.

@@ -6,10 +6,12 @@ import org.postgresql.copy.CopyManager;
 import org.postgresql.core.BaseConnection;
 import ru.demoneach.dbgenerator.App;
 import ru.demoneach.dbgenerator.entity.*;
+import ru.demoneach.dbgenerator.helper.TypeConverterHelper;
 
 import java.io.*;
 import java.net.URISyntaxException;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.List;
@@ -24,7 +26,7 @@ public class CSVFileInserter extends Inserter implements DataInserter {
     // the column list is required: ignored fields are not written to the csv, so the table column
     // order alone does not describe the file
     private static final String SQL_COPY_CMD_TEMPLATE =
-            "COPY \"%s\".\"%s\" (%s) FROM STDIN CSV HEADER DELIMITER ',';";
+            "COPY \"%s\".\"%s\" (%s) FROM STDIN WITH (FORMAT CSV, HEADER, ENCODING 'UTF8');";
     private CopyManager copyManager;
 
     public CSVFileInserter(Map<String, Rule> fieldGenerationRules, Connection conn) throws SQLException {
@@ -50,7 +52,7 @@ public class CSVFileInserter extends Inserter implements DataInserter {
         // TODO: maybe create temp file and not delete manually?
         File csvFile = new File(directory, fileName);
 
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter(csvFile))) {
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(csvFile, StandardCharsets.UTF_8))) {
             writer.write(csvHeader);
             writer.newLine();
 
@@ -79,48 +81,23 @@ public class CSVFileInserter extends Inserter implements DataInserter {
         }
     }
 
-    private String prepareDataForCsvFile(Table table, List<Field> fields, Map<Field, List<Object>> fieldReferenceValueMap, Long positiveSeq) throws JsonProcessingException {
-        StringBuilder stringBuilder = new StringBuilder();
-
+    String prepareDataForCsvFile(Table table, List<Field> fields, Map<Field, List<Object>> fieldReferenceValueMap, Long positiveSeq) throws JsonProcessingException, SQLException {
+        StringBuilder row = new StringBuilder();
         for (int i = 0; i < fields.size(); i++) {
-            if (fieldReferenceValueMap.containsKey(fields.get(i))) {
-                List<Object> fieldValues = fieldReferenceValueMap.get(fields.get(i));
-                Object queryParamValue = fieldValues.remove(fieldValues.size() - 1);
-                stringBuilder.append("\"").append(queryParamValue);
+            Field field = fields.get(i);
+            if (i > 0) row.append(',');
+            Object value;
+            if (fieldReferenceValueMap.containsKey(field)) {
+                List<Object> values = fieldReferenceValueMap.get(field);
+                value = values.remove(values.size() - 1);
+            } else if (field.getDbType().equals(SequentialPositive.class)) {
+                value = positiveSeq;
             } else {
-                Object generatedObject;
-
-                if (fields.get(i).getDbType().equals(SequentialPositive.class)) {
-                    generatedObject = positiveSeq;
-                } else {
-                    generatedObject = this.getDataGenerator().generateDataForField(table.toString(), fields.get(i));
-                }
-
-                if (generatedObject.getClass().isArray()) {
-                    generatedObject = convertArrayToInsertableString((Object[]) generatedObject);
-                }
-
-                stringBuilder.append("\"").append(generatedObject);
+                value = this.getDataGenerator().generateDataForField(table.toString(), field);
             }
-
-            stringBuilder.append("\"").append(",");
+            row.append(TypeConverterHelper.toCsvValue(field, value));
         }
-
-        stringBuilder.setLength(stringBuilder.length() - 1);
-        return stringBuilder.toString();
-    }
-
-    private String convertArrayToInsertableString(Object[] array) {
-        StringBuilder stringBuilder = new StringBuilder();
-        stringBuilder.append("{");
-
-        for (int i = 0; i < array.length; i++) {
-            stringBuilder.append((String) array[i]).append(",");
-        }
-
-        stringBuilder.setLength(stringBuilder.length() - 1);
-        stringBuilder.append("}");
-        return stringBuilder.toString();
+        return row.toString();
     }
 
     /**
