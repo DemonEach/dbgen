@@ -42,11 +42,16 @@ class PgSQLDataGeneratorForeignKeyTest {
             valuesSeenByChild.addAll(references.get(childParentId));
         };
 
-        Connection conn = mockConnectionReturningRows(List.of(42, 43));
-        new PgSQLDataGenerator(conn, layout, inserter).generateDataForTables(new Parameters());
+        List<Integer> capturedLimits = new ArrayList<>();
+        Connection conn = mockConnectionReturningRows(List.of(42, 43), capturedLimits);
+        Parameters parameters = new Parameters();
+        parameters.setAmountOfEntries(2);
+        new PgSQLDataGenerator(conn, layout, inserter).generateDataForTables(parameters);
 
         assertEquals(List.of("child"), generatedTables, "parent outside tablesToGenerate must not be (re)generated");
         assertEquals(List.of(42, 43), valuesSeenByChild, "child must still receive real existing parent values");
+        assertEquals(List.of(2), capturedLimits,
+                "the parent query must be bounded to amountOfEntries instead of fetching the whole table");
     }
 
     private static Table findTable(DatabaseLayout layout, String name) {
@@ -63,7 +68,7 @@ class PgSQLDataGeneratorForeignKeyTest {
                 .orElseThrow();
     }
 
-    private Connection mockConnectionReturningRows(List<Object> parentRows) {
+    private Connection mockConnectionReturningRows(List<Object> parentRows, List<Integer> capturedLimits) {
         Iterator<Object> rows = parentRows.iterator();
         Object[] currentRow = new Object[1];
         ResultSet resultSet = (ResultSet) Proxy.newProxyInstance(getClass().getClassLoader(),
@@ -81,6 +86,7 @@ class PgSQLDataGeneratorForeignKeyTest {
         PreparedStatement statement = (PreparedStatement) Proxy.newProxyInstance(getClass().getClassLoader(),
                 new Class<?>[]{PreparedStatement.class}, (proxy, method, args) -> switch (method.getName()) {
                     case "setFetchSize", "close" -> null;
+                    case "setInt" -> { capturedLimits.add((Integer) args[1]); yield null; }
                     case "executeQuery" -> resultSet;
                     default -> throw new AssertionError("Unexpected PreparedStatement call: " + method.getName());
                 });

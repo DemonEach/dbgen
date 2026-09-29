@@ -365,7 +365,7 @@ public class PgSQLDataGenerator {
                             continue;
                         }
 
-                        fieldValuesMap.putAll(extractLinkedField(graph.getEdgeSource(edge), edge.getReferencedFields()));
+                        fieldValuesMap.putAll(extractLinkedField(graph.getEdgeSource(edge), edge.getReferencedFields(), parameters.getAmountOfEntries()));
                     }
 
                     this.dataInserter.generateAndInsert(table, parameters, fieldValuesMap);
@@ -428,9 +428,13 @@ public class PgSQLDataGenerator {
         return result;
     }
 
-    private Map<Field, List<Object>> extractLinkedField(Table sourceTable, Map<Field, Field> referenceFieldMap) throws SQLException {
+    private Map<Field, List<Object>> extractLinkedField(Table sourceTable, Map<Field, Field> referenceFieldMap, int amountOfEntries) throws SQLException {
         String sqlFields = referenceFieldMap.keySet().stream().map(field -> SqlIdentifiers.quote(field.getName())).collect(Collectors.joining(","));
-        String sqlQuery = "SELECT %s FROM %s".formatted(sqlFields, SqlIdentifiers.qualified(sourceTable.getSchema(), sourceTable.getTableName()));
+        // referenced values are consumed one-per-row with no reuse (see Inserter.nextReferencedValue),
+        // so the source table never needs to hand back more rows than are being generated here -
+        // without this LIMIT, a large pre-existing parent (e.g. outside tablesToGenerate) gets
+        // fully materialized into an ArrayList even to generate a handful of child rows
+        String sqlQuery = "SELECT %s FROM %s LIMIT ?".formatted(sqlFields, SqlIdentifiers.qualified(sourceTable.getSchema(), sourceTable.getTableName()));
         Map<Field, List<Object>> linkedFields = referenceFieldMap.values().stream().collect(Collectors.toMap(
                 field -> field,
                 value -> new ArrayList<>()
@@ -438,6 +442,7 @@ public class PgSQLDataGenerator {
         conn.setSchema(sourceTable.getSchema());
 
         try (PreparedStatement preparedStatement = conn.prepareStatement(sqlQuery)) {
+            preparedStatement.setInt(1, amountOfEntries);
             preparedStatement.setFetchSize(100);
             ResultSet resultSet = preparedStatement.executeQuery();
 
