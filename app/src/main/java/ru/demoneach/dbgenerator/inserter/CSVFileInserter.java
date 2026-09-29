@@ -64,18 +64,18 @@ public class CSVFileInserter extends Inserter implements DataInserter {
                 }
             }
         } catch (IOException e) {
-            log.error("Cannot create file", e);
+            throw new UncheckedIOException("Cannot write CSV file: " + csvFile.getAbsolutePath(), e);
         }
 
         log.info("CSV File for table {} successfully created at: {}", sourceTable.getTableName(), csvFile.getAbsolutePath());
         String sqlCopyStatement = SQL_COPY_CMD_TEMPLATE.formatted(
                 sourceTable.getSchema(), sourceTable.getTableName(), csvHeader);
 
-        try {
-            long rowsUpdated = copyManager.copyIn(sqlCopyStatement, new FileInputStream(csvFile));
+        try (InputStream input = new FileInputStream(csvFile)) {
+            long rowsUpdated = copyManager.copyIn(sqlCopyStatement, input);
             log.debug("Inserted/updated {} from CSV file: {}", rowsUpdated, csvFile.getAbsolutePath());
         } catch (IOException e) {
-            throw new RuntimeException(e);
+            throw new UncheckedIOException("Cannot load CSV file: " + csvFile.getAbsolutePath(), e);
         }
     }
 

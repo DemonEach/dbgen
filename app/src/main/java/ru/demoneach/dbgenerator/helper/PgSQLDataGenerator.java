@@ -87,24 +87,39 @@ public class PgSQLDataGenerator {
         props.setProperty("password", connectionParameters.getPassword());
 
         this.conn = DriverManager.getConnection(url, props);
-        this.databaseLayout = new DatabaseLayout();
-        Map<String, Rule> fieldGenerationRules =  parameters.getFieldGenerationRules();
+        try {
+            this.databaseLayout = new DatabaseLayout();
+            Map<String, Rule> fieldGenerationRules =  parameters.getFieldGenerationRules();
 
-        this.dataInserter = switch (parameters.getStrategy()) {
-            case Strategy.FILE:
-                log.debug("Starting generation through file generation and COPY command");
-                yield new CSVFileInserter(fieldGenerationRules, this.conn);
-            case Strategy.MULTI:
-                log.debug("Starting generation through INSERT VALUES pattern");
-                yield new MultiValuesInserter(fieldGenerationRules, this.conn);
-            default:
-                log.debug("Using simple insert for each row");
-                yield new SimpleValuesInserter(fieldGenerationRules, this.conn);
-        };
+            this.dataInserter = switch (parameters.getStrategy()) {
+                case Strategy.FILE:
+                    log.debug("Starting generation through file generation and COPY command");
+                    yield new CSVFileInserter(fieldGenerationRules, this.conn);
+                case Strategy.MULTI:
+                    log.debug("Starting generation through INSERT VALUES pattern");
+                    yield new MultiValuesInserter(fieldGenerationRules, this.conn);
+                default:
+                    log.debug("Using simple insert for each row");
+                    yield new SimpleValuesInserter(fieldGenerationRules, this.conn);
+            };
 
-        log.info("Successfully connected to DB: {}", url);
+            log.info("Successfully connected to DB: {}", url);
 
-        formDatabaseStructure(parameters);
+            formDatabaseStructure(parameters);
+        } catch (Exception | Error failure) {
+            try {
+                conn.close();
+            } catch (SQLException | RuntimeException closeFailure) {
+                failure.addSuppressed(closeFailure);
+            }
+            throw failure;
+        }
+    }
+
+    PgSQLDataGenerator(Connection conn, DatabaseLayout databaseLayout, DataInserter dataInserter) {
+        this.conn = conn;
+        this.databaseLayout = databaseLayout;
+        this.dataInserter = dataInserter;
     }
 
     private void extractTablesAndSchemas(Strategy strategy) throws SQLException {
@@ -249,52 +264,53 @@ public class PgSQLDataGenerator {
         }
     }
 
-    public void generateDataForTables(Parameters parameters) throws SQLException, URISyntaxException {
-        try {
+    public void generateDataForTables(Parameters parameters) throws SQLException, URISyntaxException, JsonProcessingException {
+        try (Connection connection = conn) {
             conn.setAutoCommit(false);
+            try {
+                Graph<Table, ReferenceEdge> graph = this.databaseLayout.getLayoutGraph();
+                // TODO: add to additional option to exclude cycle
+    //            List<Table> visitedTables = new ArrayList<>();
+    //            List<Table> oneDegreeVerticies = new ArrayList<>();
 
-            Graph<Table, ReferenceEdge> graph = this.databaseLayout.getLayoutGraph();
-            // TODO: add to additional option to exclude cycle
-//            List<Table> visitedTables = new ArrayList<>();
-//            List<Table> oneDegreeVerticies = new ArrayList<>();
+    //            CycleDetector<Table, ReferenceEdge> cycleDetector = new CycleDetector<>(graph);
+    //            Set<Table> cycles = cycleDetector.findCycles();
+    //            for (Table source : cycles) {
+    //                for (Table target : cycles) {
+    //                    if (graph.containsEdge(source, target)) {
+    //                        graph.removeEdge(source, target);
+    //                        log.info("Problematic edge: {} -> {}", source, target);
+    //                    }
+    //                }
+    //            }
+                List<Table> sortedTables = topologicalSort(graph);
 
-//            CycleDetector<Table, ReferenceEdge> cycleDetector = new CycleDetector<>(graph);
-//            Set<Table> cycles = cycleDetector.findCycles();
-//            for (Table source : cycles) {
-//                for (Table target : cycles) {
-//                    if (graph.containsEdge(source, target)) {
-//                        graph.removeEdge(source, target);
-//                        log.info("Problematic edge: {} -> {}", source, target);
-//                    }
-//                }
-//            }
-            List<Table> sortedTables = topologicalSort(graph);
+                for (Table table : sortedTables) {
+                    log.info("Starting generation for table: {}", table);
+                    Map<Field, List<Object>> fieldValuesMap = new HashMap<>();
+                    Set<ReferenceEdge> edges = graph.edgesOf(table);
 
-            for (Table table : sortedTables) {
-                log.info("Starting generation for table: {}", table);
-                Map<Field, List<Object>> fieldValuesMap = new HashMap<>();
-                Set<ReferenceEdge> edges = graph.edgesOf(table);
+                    for (ReferenceEdge edge : edges) {
+                        if (graph.getEdgeSource(edge).equals(table)) {
+                            continue;
+                        }
 
-                for (ReferenceEdge edge : edges) {
-                    if (graph.getEdgeSource(edge).equals(table)) {
-                        continue;
+                        fieldValuesMap.putAll(extractLinkedField(graph.getEdgeSource(edge), edge.getReferencedFields()));
                     }
 
-                    fieldValuesMap.putAll(extractLinkedField(graph.getEdgeSource(edge), edge.getReferencedFields()));
+                    this.dataInserter.generateAndInsert(table, parameters, fieldValuesMap);
+                    log.info("Finished generation for table: {}", table);
                 }
 
-                this.dataInserter.generateAndInsert(table, parameters, fieldValuesMap);
-                log.info("Finished generation for table: {}", table);
+                conn.commit();
+            } catch (SQLException | JsonProcessingException | URISyntaxException | RuntimeException | Error failure) {
+                try {
+                    conn.rollback();
+                } catch (SQLException | RuntimeException rollbackFailure) {
+                    failure.addSuppressed(rollbackFailure);
+                }
+                throw failure;
             }
-
-            conn.setAutoCommit(true);
-        } catch (SQLException e) {
-            log.error("Cannot execute query", e);
-            conn.rollback();
-        } catch (JsonProcessingException e) {
-            throw new RuntimeException(e);
-        } finally {
-            conn.close();
         }
     }
 
