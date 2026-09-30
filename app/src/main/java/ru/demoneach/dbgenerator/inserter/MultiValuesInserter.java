@@ -15,7 +15,6 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 
 @Slf4j
 public class MultiValuesInserter extends Inserter implements DataInserter {
@@ -32,7 +31,8 @@ public class MultiValuesInserter extends Inserter implements DataInserter {
             return;
         }
 
-        int batch = parameters.getBatch();
+        // PostgreSQL JDBC extended protocol allows at most 65535 bind parameters.
+        int batch = Math.min(parameters.getBatch(), 65535 / fields.size());
         int amountOfEntries = parameters.getAmountOfEntries();
 
         int fullBatches = amountOfEntries / batch;
@@ -57,38 +57,25 @@ public class MultiValuesInserter extends Inserter implements DataInserter {
 
         try (PreparedStatement preparedStatement = this.getConn().prepareStatement(sqlQuery)) {
             for (int i = 0; i < timesToExecute; i++) {
-                prepareDataForStatementForMultipleValues(sourceTable, preparedStatement, fields, batch);
-                if (Objects.nonNull(fieldReferenceValueMap) && !fieldReferenceValueMap.isEmpty()) {
-                    setReferencedFieldFromList(sourceTable, preparedStatement, fields, fieldReferenceValueMap, batch);
-                }
+                prepareDataForStatementForMultipleValues(sourceTable, preparedStatement, fields, fieldReferenceValueMap, batch);
 
                 preparedStatement.execute();
             }
         }
     }
 
-    private void setReferencedFieldFromList(Table table,
-                                            PreparedStatement preparedStatement,
-                                            List<Field> fields,
-                                            Map<Field, List<Object>> fieldReferenceValueMap,
-                                            Integer batch) throws SQLException, JsonProcessingException {
-        for (int i = 0; i < batch; i++) {
-            for (Field field : fieldReferenceValueMap.keySet()) {
-                if (!fields.contains(field)) continue;
-                Integer queryParamId = (i * fields.size()) + fields.indexOf(field) + 1;
-                Object queryParamValue = nextReferencedValue(table, field, fieldReferenceValueMap.get(field));
-                TypeConverterHelper.setCorrectDbTypeOfObject(preparedStatement, queryParamId, field, queryParamValue, this.getConn());
-            }
-        }
-    }
-
-    private void prepareDataForStatementForMultipleValues(Table table, PreparedStatement preparedStatement, List<Field> fields, Integer batch) throws SQLException, JsonProcessingException {
+    private void prepareDataForStatementForMultipleValues(Table table, PreparedStatement preparedStatement,
+                                                         List<Field> fields, Map<Field, List<Object>> references,
+                                                         int batch) throws SQLException, JsonProcessingException {
+        String tableName = table.toString();
         for (int i = 0; i < batch; i++) {
             for (int j = 0; j < fields.size(); j++) {
-                Object generatedObject = this.getDataGenerator().generateDataForField(table.toString(), fields.get(j));
-                Integer queryIndex = (i * fields.size()) + j + 1;
-
-                TypeConverterHelper.setCorrectDbTypeOfObject(preparedStatement, queryIndex, fields.get(j), generatedObject, this.getConn());
+                Field field = fields.get(j);
+                Object value = references != null && references.containsKey(field)
+                        ? nextReferencedValue(table, field, references.get(field))
+                        : this.getDataGenerator().generateDataForField(tableName, field);
+                TypeConverterHelper.setCorrectDbTypeOfObject(preparedStatement,
+                        i * fields.size() + j + 1, field, value, this.getConn());
             }
         }
     }

@@ -41,6 +41,8 @@ Both settings must be positive. They do not control transaction commits. Previou
 benchmark starting point for both settings (see `bench/`), not a proven optimum for every
 schema — measure on yours, especially for wide tables where more columns means more bind
 parameters per statement.
+MULTI automatically caps each statement at 65,535 bind parameters, using only the
+columns actually inserted; excess rows and the final remainder go into subsequent statements.
 
 ### Data formats
 
