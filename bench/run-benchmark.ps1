@@ -17,10 +17,13 @@ param(
     [int[]] $RowCounts = @(10000, 100000),
     [string[]] $Shapes = @('narrow', 'wide', 'parent_child'),
     [string[]] $Strategies = @('DEFAULT', 'MULTI', 'FILE'),
-    [int] $Reps = 3,
-    [int] $Batch = 1,
+    [ValidateRange(1, 1000)][int] $Reps = 3,
+    [int] $Batch = 1000,
+    [ValidateRange(1, 2147483647)][int] $BatchSave = 1000,
+    [ValidateRange(0, 100)][int] $Warmups = 0,
     [string] $Tag = 'pilot',
     [string] $ContainerName = 'dbgen-bench',
+    [string] $DockerExe = 'docker',
     [int] $Port = 15432,
     [string] $JavaExe = 'C:/Program Files/Java/jdk-21.0.11/bin/java.exe',
     [string] $RepoRoot = 'C:/pet/dbgen'
@@ -28,12 +31,12 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $runDir = "$RepoRoot/bench/run"
-New-Item -ItemType Directory -Force $runDir | Out-Null
+New-Item -ItemType Directory -Force $runDir, "$RepoRoot/bench/results" | Out-Null
 $classpath = (Get-ChildItem "$RepoRoot/build/p0check/lib" -Filter '*.jar').FullName -join ';'
 $classpath = "$RepoRoot/build/p0check/classes;$classpath"
 
 function Invoke-Psql([string]$Sql) {
-    $out = $Sql | docker exec -i $ContainerName psql -U postgres -t -A
+    $out = $Sql | & $DockerExe exec -i $ContainerName psql -v ON_ERROR_STOP=1 -U postgres -t -A
     if ($LASTEXITCODE -ne 0) { throw "psql failed: $Sql" }
     return ($out | Where-Object { $_ -ne '' })
 }
@@ -73,7 +76,7 @@ function Get-YamlForShape([string]$Shape, [int]$Rows, [string]$Strategy, [string
 debug: false
 amountOfEntries: $Rows
 strategy: $Strategy
-batchSave: 1000
+batchSave: $BatchSave
 batch: $Batch
 connectionParameters:
   host: localhost
@@ -86,8 +89,8 @@ $tableLines
 "@
 }
 
-# per-table "Starting generation" / "Finished generation" timestamps -> generation-only ms,
-# separate from JVM startup + connect + metadata/graph build that precede it
+# per-table timestamps include generation, FK reads and insertion, but exclude commit;
+# wall_ms includes the entire CLI process through commit and exit.
 function Get-GenerationMs([string[]]$LogLines) {
     $starts = @()
     $finishes = @()
@@ -109,7 +112,7 @@ foreach ($rows in $RowCounts) {
         foreach ($strategy in $Strategies) {
             $comboIndex++
             Write-Host "[$comboIndex/$totalCombos] rows=$rows shape=$shape strategy=$strategy"
-            for ($rep = 1; $rep -le $Reps; $rep++) {
+            for ($rep = 1 - $Warmups; $rep -le $Reps; $rep++) {
                 Reset-Shape $shape | Out-Null
                 $yaml = Get-YamlForShape $shape $rows $strategy $tables
                 Set-Content -Path "$runDir/application.yaml" -Value $yaml -Encoding utf8
@@ -130,6 +133,8 @@ foreach ($rows in $RowCounts) {
                     shape       = $shape
                     strategy    = $strategy
                     batch       = $Batch
+                    batch_save  = $BatchSave
+                    warmup      = ($rep -le 0)
                     rep         = $rep
                     exit_code   = $exitCode
                     wall_ms     = [math]::Round($sw.Elapsed.TotalMilliseconds, 1).ToString([System.Globalization.CultureInfo]::InvariantCulture)
@@ -152,11 +157,11 @@ $results | Export-Csv $csvPath -NoTypeInformation
 Write-Host "`nRaw results: $csvPath"
 
 Write-Host "`nMedian wall_ms / gen_ms per (rows, shape, strategy), n=${Reps}:"
-$results | Group-Object rows, shape, strategy | ForEach-Object {
+$results | Where-Object { -not $_.warmup -and $_.verify_ok -and $_.exit_code -eq 0 } | Group-Object rows, shape, strategy | ForEach-Object {
     $sorted = $_.Group.wall_ms | ForEach-Object { [double]$_ } | Sort-Object
     $genSorted = $_.Group.gen_ms | Where-Object { $null -ne $_ } | ForEach-Object { [double]$_ } | Sort-Object
-    $medianWall = $sorted[[math]::Floor(($sorted.Count - 1) / 2)]
-    $medianGen = if ($genSorted.Count -gt 0) { $genSorted[[math]::Floor(($genSorted.Count - 1) / 2)] } else { $null }
+    $medianWall = ($sorted[[math]::Floor(($sorted.Count - 1) / 2)] + $sorted[[math]::Floor($sorted.Count / 2)]) / 2
+    $medianGen = if ($genSorted.Count -gt 0) { ($genSorted[[math]::Floor(($genSorted.Count - 1) / 2)] + $genSorted[[math]::Floor($genSorted.Count / 2)]) / 2 } else { $null }
     $allOk = ($_.Group.verify_ok -notcontains $false)
     [pscustomobject]@{
         key         = $_.Name
@@ -165,3 +170,5 @@ $results | Group-Object rows, shape, strategy | ForEach-Object {
         all_verified = $allOk
     }
 } | Sort-Object key | Format-Table -AutoSize
+
+if ($results | Where-Object { -not $_.verify_ok -or $_.exit_code -ne 0 }) { throw 'Benchmark verification failed; see raw results.' }
