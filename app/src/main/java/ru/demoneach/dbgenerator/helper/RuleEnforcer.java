@@ -1,75 +1,80 @@
 package ru.demoneach.dbgenerator.helper;
 
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.Getter;
-import lombok.Setter;
-import ru.demoneach.dbgenerator.entity.*;
 import ru.demoneach.dbgenerator.entity.*;
 import ru.demoneach.dbgenerator.generator.DataGenerator;
 
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Random;
+import java.util.*;
+import java.util.function.Supplier;
 
-@AllArgsConstructor
-@Data
-@Getter
-@Setter
 public class RuleEnforcer {
-
     private static final String KEY_TEMPLATE = "%s.%s";
     private static final Random RANDOM = new Random();
+    private static final Supplier<Object> NO_RULE = () -> null;
+    private final Map<String, Rule> fieldGenerationRules = new HashMap<>();
+    private final Map<String, Map<Field, Supplier<Object>>> preparedRules = new HashMap<>();
 
-    private Map<String, Rule> fieldGenerationRules;
+    public RuleEnforcer(Map<String, Rule> rules) {
+        // A run owns its configuration; later edits must not invalidate prepared values.
+        if (rules != null) rules.forEach((key, rule) -> fieldGenerationRules.put(key,
+                rule == null ? null : new Rule(rule.getRuleType(), rule.getValue() == null
+                        ? null : new ArrayList<>(rule.getValue()))));
+    }
+
+    // Prepare on first use: skipped/default/generated/FK fields never need their rules parsed.
+    public Supplier<Object> preparedRule(String schemaTable, Field field) {
+        if (fieldGenerationRules.isEmpty()) return null;
+        Supplier<Object> rule = preparedRules.computeIfAbsent(schemaTable, key -> new HashMap<>())
+                .computeIfAbsent(field, key -> prepareRule(schemaTable, field));
+        return rule == NO_RULE ? null : rule;
+    }
+
+    private Supplier<Object> prepareRule(String schemaTable, Field field) {
+        String key = KEY_TEMPLATE.formatted(schemaTable, SqlIdentifiers.configPart(field.getName()));
+        Rule rule = fieldGenerationRules.get(key);
+        if (rule == null || rule.getValue() == null || rule.getRuleType() == RuleType.IGNORE) return NO_RULE;
+        if (rule.getRuleType() == null) throw new IllegalArgumentException("Missing rule type for " + key);
+        int count = switch (rule.getRuleType()) {
+            case CONST -> 1;
+            case RANGE -> 2;
+            case LIST -> rule.getValue().size();
+            case IGNORE -> 0;
+        };
+        if (count == 0 || rule.getValue().size() < count) {
+            throw new IllegalArgumentException("Not enough rule values for " + key);
+        }
+        Object[] values = new Object[count];
+        for (int i = 0; i < count; i++) {
+            try {
+                values[i] = TypeConverterHelper.convertObjectToCorrectType(field.getDbType(), rule.getValue().get(i));
+            } catch (IllegalArgumentException failure) {
+                throw new IllegalArgumentException("Invalid rule value for " + key + " at index " + i, failure);
+            }
+        }
+        return switch (rule.getRuleType()) {
+            case CONST -> () -> copyArray(values[0]);
+            case LIST -> () -> copyArray(values[RANDOM.nextInt(values.length)]);
+            case RANGE -> () -> DataGenerator.generateRandomValuesInRange(values[0], values[1]);
+            case IGNORE -> NO_RULE;
+        };
+    }
+
+    private static Object copyArray(Object value) {
+        if (value instanceof byte[] bytes) return bytes.clone();
+        if (value instanceof String[] strings) return strings.clone();
+        return value;
+    }
+
+    public boolean hasApplicableRule(String schemaTable, Field field) {
+        return preparedRule(schemaTable, field) != null;
+    }
 
     public Object extractRuleValue(String schemaTable, Field field) {
         return extractRuleValueOrDefault(schemaTable, field, null);
     }
 
-    // Lets callers skip generating a value they are about to discard: CONST/LIST/RANGE fully
-    // replace it, so there is no need to run EasyRandom (or the numeric/String generation path)
-    // first just to throw the result away. IGNORE is excluded: those fields are filtered out
-    // before generation (see filterIgnoredFields), so reaching this point with an IGNORE rule
-    // would be a bug elsewhere - falling through to normal generation is the safer default.
-    public boolean hasApplicableRule(String schemaTable, Field field) {
-        if (Objects.isNull(fieldGenerationRules) || fieldGenerationRules.isEmpty()) {
-            return false;
-        }
-
-        Rule rule = this.fieldGenerationRules.get(KEY_TEMPLATE.formatted(schemaTable, SqlIdentifiers.configPart(field.getName())));
-        return rule != null && rule.getValue() != null && rule.getRuleType() != RuleType.IGNORE;
-    }
-
     public Object extractRuleValueOrDefault(String schemaTable, Field field, Object defaultValue) {
-        if (Objects.isNull(fieldGenerationRules) || fieldGenerationRules.isEmpty()) {
-            return defaultValue;
-        }
-
-        Rule rule = this.fieldGenerationRules.get(KEY_TEMPLATE.formatted(schemaTable, SqlIdentifiers.configPart(field.getName())));
-
-        if (rule == null || rule.getValue() == null) {
-            return defaultValue;
-        }
-
-        // the switch is exhaustive on purpose: adding a new RuleType must not silently
-        // fall through to a default branch that puts a raw List into the column
-        return switch (rule.getRuleType()) {
-            case CONST -> TypeConverterHelper.convertObjectToCorrectType(field.getDbType(), rule.getValue().get(0));
-            case LIST -> {
-                String str = rule.getValue().get(RANDOM.nextInt(rule.getValue().size()));
-                yield TypeConverterHelper.convertObjectToCorrectType(field.getDbType(), str);
-            }
-            case RANGE -> {
-                Object minRange = TypeConverterHelper.convertObjectToCorrectType(field.getDbType(), rule.getValue().get(0));
-                Object maxRange = TypeConverterHelper.convertObjectToCorrectType(field.getDbType(), rule.getValue().get(1));
-
-                yield DataGenerator.generateRandomValuesInRange(minRange, maxRange);
-            }
-            // the field is filtered out before generation, so this is only a safety net
-            case IGNORE -> defaultValue;
-        };
+        Supplier<Object> rule = preparedRule(schemaTable, field);
+        return rule == null ? defaultValue : rule.get();
     }
 
     private boolean checkIfHasRuleType(String schemaTable, String fieldName, RuleType ruleType) {

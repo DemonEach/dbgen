@@ -14,6 +14,61 @@ import static org.junit.jupiter.api.Assertions.*;
 class RuleEnforcerTest {
 
     @Test
+    void preparesOncePerTableAndFieldAndKeepsNumericValidationAtSerialization() throws Exception {
+        Field amount = new Field("amount", "numeric(5,2)");
+        Rule rule = new Rule(RuleType.CONST, new java.util.ArrayList<>(List.of("1.239")));
+        RuleEnforcer enforcer = new RuleEnforcer(Map.of("a.t.amount", rule,
+                "b.t.amount", new Rule(RuleType.CONST, List.of("1000"))));
+        rule.getValue().set(0, "9");
+        var prepared = enforcer.preparedRule("a.t", amount);
+        assertSame(prepared, enforcer.preparedRule("a.t", amount));
+        assertSame(prepared.get(), prepared.get());
+        assertEquals(new BigDecimal("1.239"), prepared.get());
+        assertEquals("\"1.24\"", TypeConverterHelper.toCsvValue(amount, prepared.get()));
+        assertThrows(IllegalArgumentException.class,
+                () -> TypeConverterHelper.toCsvValue(amount, enforcer.extractRuleValue("b.t", amount)));
+        assertNull(enforcer.preparedRule("c.t", amount));
+    }
+
+    @Test
+    void cachedArraysAreNotSharedAndListRetainsNullEntries() {
+        Field bytes = new Field("bytes", "bytea");
+        Field tags = new Field("tags", "text[]");
+        RuleEnforcer enforcer = new RuleEnforcer(Map.of(
+                "public.t.bytes", new Rule(RuleType.CONST, List.of("\\x01ff")),
+                "public.t.tags", new Rule(RuleType.LIST, List.of("[\"a\",null]")),
+                "public.t.name", new Rule(RuleType.LIST, java.util.Arrays.asList((String) null))));
+        ((byte[]) enforcer.extractRuleValue("public.t", bytes))[0] = 9;
+        assertArrayEquals(new byte[]{1, (byte) 255}, (byte[]) enforcer.extractRuleValue("public.t", bytes));
+        ((String[]) enforcer.extractRuleValue("public.t", tags))[0] = "changed";
+        assertArrayEquals(new String[]{"a", null}, (String[]) enforcer.extractRuleValue("public.t", tags));
+        Field name = new Field("name", "text");
+        assertTrue(enforcer.hasApplicableRule("public.t", name));
+        assertNull(enforcer.extractRuleValueOrDefault("public.t", name, "fallback"));
+    }
+
+    @Test
+    void preparesEveryListEntryAndOnlyUsedConstAndRangeEntries() {
+        Field value = new Field("value", "integer");
+        RuleEnforcer list = new RuleEnforcer(Map.of("public.t.value",
+                new Rule(RuleType.LIST, List.of("1", "invalid"))));
+        assertTrue(assertThrows(IllegalArgumentException.class,
+                () -> list.extractRuleValue("public.t", value)).getMessage().contains("public.t.value"));
+        assertEquals(1, new RuleEnforcer(Map.of("public.t.value",
+                new Rule(RuleType.CONST, List.of("1", "invalid")))).extractRuleValue("public.t", value));
+        var range = new RuleEnforcer(Map.of("public.t.value",
+                new Rule(RuleType.RANGE, List.of("1", "1000000", "invalid"))))
+                .preparedRule("public.t", value);
+        java.util.Set<Object> samples = new java.util.HashSet<>();
+        for (int i = 0; i < 100; i++) {
+            int result = (Integer) range.get();
+            assertTrue(result >= 1 && result < 1000000);
+            samples.add(result);
+        }
+        assertTrue(samples.size() > 1);
+    }
+
+    @Test
     void noRulesAtAllMeansNoApplicableRuleAnywhere() {
         RuleEnforcer enforcer = new RuleEnforcer(null);
         Field field = new Field("name", "text");

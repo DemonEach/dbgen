@@ -60,6 +60,11 @@ columns actually inserted; excess rows and the final remainder go into subsequen
 
 ### Server-generated values
 
+Rule values are parsed once per field on first use: CONST's first value, every LIST
+entry, and RANGE's two bounds. LIST/RANGE still select a fresh value per row.
+An invalid LIST entry fails at preparation even if random selection would not pick it.
+NULL entries remain SQL NULL; numeric rounding and overflow checks still happen when writing.
+
 All strategies omit serial, identity (ALWAYS and BY DEFAULT), and generated columns;
 PostgreSQL supplies their values. Generation rules do not override these columns.
 Ordinary columns with DEFAULT are also omitted unless a generation rule is supplied.

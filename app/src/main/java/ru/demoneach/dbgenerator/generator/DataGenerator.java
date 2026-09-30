@@ -38,8 +38,9 @@ public class DataGenerator {
     public Object generateDataForField(String schemaTable, Field field) {
         // CONST/LIST/RANGE fully replace the generated value, so skip generating (and for JSON/
         // numeric, the extra object/BigInteger work) one that would just be thrown away.
-        if (ruleEnforcer.hasApplicableRule(schemaTable, field)) {
-            return ruleEnforcer.extractRuleValue(schemaTable, field);
+        var rule = ruleEnforcer.preparedRule(schemaTable, field);
+        if (rule != null) {
+            return rule.get();
         }
 
         if (field.getNumericLimit() != null) {
