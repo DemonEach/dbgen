@@ -115,10 +115,20 @@ Values for a foreign key are taken from the parent table with `LIMIT <rows reque
 a random sample of the parent, and each value is used once. Random sampling would need a full
 scan and sort of the parent, which is impractical for large tables.
 
-### Running the PostgreSQL regression test
+### Running the tests
 
-`GeneratedColumnsPostgresTest` is enabled when `DBGEN_TEST_DATABASE` names a test
-database. Optional variables: `DBGEN_TEST_HOST` (localhost), `DBGEN_TEST_PORT` (5432),
-`DBGEN_TEST_USER` (postgres), `DBGEN_TEST_PASSWORD` (empty). Run `gradlew test`.
-The test creates a unique `dbgen_test_*` schema and drops that schema in cleanup.
-It checks repeated loads across all strategies and a regular insert afterwards.
+`./gradlew test` runs the unit tests. The PostgreSQL tests (`GeneratedColumnsPostgresTest`,
+`StrategiesPostgresTest`: type round-trip, batching and rollback for all three strategies) are
+enabled only when `DBGEN_TEST_DATABASE` names a test database; without it they are skipped
+silently. Optional variables: `DBGEN_TEST_HOST` (localhost), `DBGEN_TEST_PORT` (5432),
+`DBGEN_TEST_USER` (postgres), `DBGEN_TEST_PASSWORD` (empty). The tests create and drop their
+own schemas.
+
+Everything at once, with a throwaway PostgreSQL 16 in Docker (stopped even if tests fail):
+
+```bash
+docker run -d --rm --name dbgen-test -e POSTGRES_PASSWORD=x -e POSTGRES_DB=dbgen_test -p 15434:5432 postgres:16-alpine >/dev/null && until docker exec dbgen-test pg_isready -U postgres -d dbgen_test >/dev/null 2>&1; do sleep 1; done; sleep 2; DBGEN_TEST_DATABASE=dbgen_test DBGEN_TEST_PORT=15434 DBGEN_TEST_PASSWORD=x ./gradlew test --rerun-tasks; docker stop dbgen-test >/dev/null
+```
+
+`--rerun-tasks` bypasses Gradle's cached results. The report is in
+`app/build/reports/tests/test/index.html`; with the database up, no test should be skipped.

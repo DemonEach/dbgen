@@ -57,6 +57,10 @@ application {
 tasks.named('test') {
     // Use JUnit Platform for unit tests.
     useJUnitPlatform()
+    // PostgreSQL tests are enabled by these variables; make Gradle re-run tests when they change
+    ['DBGEN_TEST_DATABASE', 'DBGEN_TEST_HOST', 'DBGEN_TEST_PORT', 'DBGEN_TEST_USER'].each {
+        inputs.property(it, providers.environmentVariable(it).orElse(''))
+    }
 }
 
 jar {
