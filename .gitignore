@@ -8,3 +8,6 @@ build
 **/db_layout.png
 # per-run scratch config written by bench/run-benchmark.ps1
 bench/run/
+# local config may contain credentials
+application.yaml
+!application-example.yaml

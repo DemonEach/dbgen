@@ -63,6 +63,9 @@ columns actually inserted; excess rows and the final remainder go into subsequen
 Rule values are parsed once per field on first use: CONST's first value, every LIST
 entry, and RANGE's two bounds. LIST/RANGE still select a fresh value per row.
 An invalid LIST entry fails at preparation even if random selection would not pick it.
+RANGE bounds are validated at that point too: both must be the same supported type
+(numeric, integer types, float/double, timestamp) and min must not exceed max, otherwise the
+error names the field. The upper bound is exclusive; `min == max` always yields that value.
 NULL entries remain SQL NULL; numeric rounding and overflow checks still happen when writing.
 
 All strategies omit serial, identity (ALWAYS and BY DEFAULT), and generated columns;
@@ -106,6 +109,11 @@ not supported yet; both fail with a clear error naming the constraint and tables
 of silently using only one column or dropping one of the links. A referenced table with
 fewer rows than are being requested (including no rows at all) also fails with a clear
 error instead of an unrelated index-out-of-bounds exception.
+
+Values for a foreign key are taken from the parent table with `LIMIT <rows requested>` and no
+`ORDER BY`, so they are whatever PostgreSQL returns first (usually physical or index order), not
+a random sample of the parent, and each value is used once. Random sampling would need a full
+scan and sort of the parent, which is impractical for large tables.
 
 ### Running the PostgreSQL regression test
 

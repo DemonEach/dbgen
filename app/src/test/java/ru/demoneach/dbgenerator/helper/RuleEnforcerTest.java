@@ -147,4 +147,13 @@ class RuleEnforcerTest {
         assertTrue(enforcer.hasApplicableRule("public.t", field));
         assertNull(enforcer.extractRuleValue("public.t", field));
     }
+
+    @Test
+    void rangeWithMinAboveMaxFailsOnPreparationNamingTheField() {
+        RuleEnforcer enforcer = new RuleEnforcer(Map.of("public.t.value",
+                new Rule(RuleType.RANGE, List.of("10", "1"))));
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> enforcer.hasApplicableRule("public.t", new Field("value", "integer")));
+        assertTrue(e.getMessage().contains("public.t.value"));
+    }
 }

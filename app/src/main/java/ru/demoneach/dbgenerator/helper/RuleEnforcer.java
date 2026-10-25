@@ -50,6 +50,13 @@ public class RuleEnforcer {
                 throw new IllegalArgumentException("Invalid rule value for " + key + " at index " + i, failure);
             }
         }
+        if (rule.getRuleType() == RuleType.RANGE) {
+            try {
+                DataGenerator.validateRange(values[0], values[1]);
+            } catch (IllegalArgumentException failure) {
+                throw new IllegalArgumentException("Invalid RANGE rule for " + key + ": " + failure.getMessage(), failure);
+            }
+        }
         return switch (rule.getRuleType()) {
             case CONST -> () -> copyArray(values[0]);
             case LIST -> () -> copyArray(values[RANDOM.nextInt(values.length)]);
