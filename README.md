@@ -110,22 +110,37 @@ of silently using only one column or dropping one of the links. A referenced tab
 fewer rows than are being requested (including no rows at all) also fails with a clear
 error instead of an unrelated index-out-of-bounds exception.
 
-Values for a foreign key are taken from the parent table with `LIMIT <rows requested>` and no
-`ORDER BY`, so they are whatever PostgreSQL returns first (usually physical or index order), not
-a random sample of the parent, and each value is used once. Random sampling would need a full
-scan and sort of the parent, which is impractical for large tables.
+### Reference rules
 
-### Reference rules (work in progress)
-
-`referenceRules` will control how many child rows reference one parent row. The key is
+`referenceRules` controls how many child rows point to one parent row. The key is
 `schema.table.constraint_name` of the foreign key (so composite keys and several keys between
-the same two tables can be told apart); the value is `childrenPerParent: [min, max]`, inclusive,
-with `0 <= min <= max` and `max >= 1`. A foreign key without a rule uses `[1, 1]`.
+the same two tables can be told apart; see `\d table` in psql), the value is
+`childrenPerParent: [min, max]`, inclusive, with `0 <= min <= max` and `max >= 1`:
 
-Currently the rules are only parsed and validated: malformed values fail at startup, and a key
-that does not name an existing foreign key constraint fails before anything is written.
-They do not change generation yet. Links from `customTableLinks` have no constraint and cannot
-be configured this way.
+```yaml
+referenceRules:
+  shop.orders.orders_customer_id_fkey:
+    childrenPerParent: [0, 5]   # 0..5 orders per customer, some customers have none
+```
+
+- Without a rule a foreign key uses `[1, 1]`: every parent is referenced by exactly one child,
+  so the parent table needs at least `amountOfEntries` rows.
+- `amountOfEntries` is still the total number of rows generated in the child table. The range
+  decides how they are spread: parents are picked at random and each gets between `min` and `max`
+  children. Parents that are not picked get none, which is how `min = 0` leaves childless parents.
+  Child rows of one parent are shuffled across the table, not stored next to each other.
+- When the numbers do not fit (for example 7 rows with exactly 3 children per parent, or too few
+  parent rows for the requested `max`) the run fails before writing anything and says why.
+- The constraint must exist and be a foreign key, otherwise the run stops at startup. A rule with
+  `max > 1` on a referencing column that has a unique index is rejected too, since the insert
+  would fail on it. Links from `customTableLinks` have no constraint and always use `[1, 1]`.
+
+Parents are chosen randomly with bounded memory. A parent table that is much larger than needed
+is read with `TABLESAMPLE BERNOULLI`, which costs one sequential scan; a small one is read and
+shuffled in memory. Table size comes from `pg_class.reltuples` (run `ANALYZE` to keep it accurate);
+if it is unknown the table is counted exactly when it looks big. A parent that cannot be sampled
+(for example a partitioned table) and has more than about `4 * rows` rows is read in storage order
+instead of uniformly, and a warning is logged.
 
 ### Running the tests
 

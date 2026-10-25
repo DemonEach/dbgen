@@ -6,10 +6,22 @@ public class ReferenceEdge {
     // perhaps there may be a situation with several references of the same field, but this should not be the case in most cases.
     private Map<Field, Field> referencedFields;
 
+    // name of the foreign key constraint; null for links that come from customTableLinks
+    private String constraintName;
+
     public ReferenceEdge() {}
 
     public ReferenceEdge(Map<Field, Field> referencedFields) {
         this.referencedFields = referencedFields;
+    }
+
+    public ReferenceEdge(Map<Field, Field> referencedFields, String constraintName) {
+        this.referencedFields = referencedFields;
+        this.constraintName = constraintName;
+    }
+
+    public String getConstraintName() {
+        return constraintName;
     }
 
     public Map<Field, Field> getReferencedFields() {

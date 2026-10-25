@@ -35,7 +35,11 @@ public class DatabaseLayout {
     }
 
     public void addTableEdge(Table referencedTable, Table currentTable, Map<Field, Field> referenceFieldMap) {
-        ReferenceEdge referenceEdge = new ReferenceEdge(referenceFieldMap);
+        addTableEdge(referencedTable, currentTable, referenceFieldMap, null);
+    }
+
+    public void addTableEdge(Table referencedTable, Table currentTable, Map<Field, Field> referenceFieldMap, String constraintName) {
+        ReferenceEdge referenceEdge = new ReferenceEdge(referenceFieldMap, constraintName);
 
         // the underlying graph is not a multigraph: a second edge between the same pair of
         // tables (several FKs on one pair, or a custom link duplicating a real FK) is silently

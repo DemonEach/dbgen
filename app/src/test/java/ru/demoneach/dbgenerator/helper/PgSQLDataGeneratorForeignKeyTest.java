@@ -9,10 +9,7 @@ import ru.demoneach.dbgenerator.inserter.DataInserter;
 
 import java.lang.reflect.Proxy;
 import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -42,16 +39,24 @@ class PgSQLDataGeneratorForeignKeyTest {
             valuesSeenByChild.addAll(references.get(childParentId));
         };
 
-        List<Integer> capturedLimits = new ArrayList<>();
-        Connection conn = mockConnectionReturningRows(List.of(42, 43), capturedLimits);
+        List<Integer> requestedRows = new ArrayList<>();
+        List<List<Field>> requestedColumns = new ArrayList<>();
+        ParentRowSource source = (parentTable, columns, wanted) -> {
+            assertEquals("parent", parentTable.getTableName());
+            requestedRows.add(wanted);
+            requestedColumns.add(columns);
+            return new ArrayList<>(List.of(new Object[]{42}, new Object[]{43}));
+        };
         Parameters parameters = new Parameters();
         parameters.setAmountOfEntries(2);
-        new PgSQLDataGenerator(conn, layout, inserter).generateDataForTables(parameters);
+        new PgSQLDataGenerator(mockConnection(), layout, inserter, source).generateDataForTables(parameters);
 
         assertEquals(List.of("child"), generatedTables, "parent outside tablesToGenerate must not be (re)generated");
-        assertEquals(List.of(42, 43), valuesSeenByChild, "child must still receive real existing parent values");
-        assertEquals(List.of(2), capturedLimits,
-                "the parent query must be bounded to amountOfEntries instead of fetching the whole table");
+        assertEquals(2, valuesSeenByChild.size());
+        assertEquals(Set.of(42, 43), Set.copyOf(valuesSeenByChild), "child must still receive real existing parent values, each used once by default");
+        assertEquals(List.of(2), requestedRows,
+                "by default only as many parent rows as child rows are requested, not the whole table");
+        assertEquals(List.of(List.of(parentId)), requestedColumns);
     }
 
     private static Table findTable(DatabaseLayout layout, String name) {
@@ -68,33 +73,10 @@ class PgSQLDataGeneratorForeignKeyTest {
                 .orElseThrow();
     }
 
-    private Connection mockConnectionReturningRows(List<Object> parentRows, List<Integer> capturedLimits) {
-        Iterator<Object> rows = parentRows.iterator();
-        Object[] currentRow = new Object[1];
-        ResultSet resultSet = (ResultSet) Proxy.newProxyInstance(getClass().getClassLoader(),
-                new Class<?>[]{ResultSet.class}, (proxy, method, args) -> {
-                    return switch (method.getName()) {
-                        case "next" -> {
-                            if (!rows.hasNext()) yield false;
-                            currentRow[0] = rows.next();
-                            yield true;
-                        }
-                        case "getObject" -> currentRow[0];
-                        case "findColumn" -> 1;
-                        default -> throw new AssertionError("Unexpected ResultSet call: " + method.getName());
-                    };
-                });
-        PreparedStatement statement = (PreparedStatement) Proxy.newProxyInstance(getClass().getClassLoader(),
-                new Class<?>[]{PreparedStatement.class}, (proxy, method, args) -> switch (method.getName()) {
-                    case "setFetchSize", "close" -> null;
-                    case "setInt" -> { capturedLimits.add((Integer) args[1]); yield null; }
-                    case "executeQuery" -> resultSet;
-                    default -> throw new AssertionError("Unexpected PreparedStatement call: " + method.getName());
-                });
+    private Connection mockConnection() {
         return (Connection) Proxy.newProxyInstance(getClass().getClassLoader(),
                 new Class<?>[]{Connection.class}, (proxy, method, args) -> switch (method.getName()) {
                     case "setAutoCommit", "commit", "rollback", "close", "setSchema" -> null;
-                    case "prepareStatement" -> statement;
                     default -> throw new AssertionError("Unexpected Connection call: " + method.getName());
                 });
     }

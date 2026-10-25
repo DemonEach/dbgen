@@ -24,6 +24,8 @@ public class PgSQLDataGenerator {
     private Connection conn;
     private DatabaseLayout databaseLayout;
     private DataInserter dataInserter;
+    private ParentRowSource parentRowSource;
+    private final Random random = new Random();
 
     private static final String GET_DATABASE_STRUCTURE = """
             SELECT schemaname, tablename FROM pg_tables
@@ -86,6 +88,19 @@ public class PgSQLDataGenerator {
             WHERE  n.nspname = ? AND t.relname = ? AND c.conname = ? AND c.contype = 'f'
             """;
 
+    private static final String FIND_UNIQUE_INDEX_ON_FOREIGN_KEY = """
+            SELECT idx.relname
+            FROM   pg_constraint c
+            JOIN   pg_class t ON t.oid = c.conrelid
+            JOIN   pg_namespace n ON n.oid = t.relnamespace
+            JOIN   pg_index i ON i.indrelid = c.conrelid
+            JOIN   pg_class idx ON idx.oid = i.indexrelid
+            WHERE  n.nspname = ? AND t.relname = ? AND c.conname = ? AND c.contype = 'f'
+            AND    i.indisunique AND i.indpred IS NULL AND i.indexprs IS NULL
+            AND    i.indkey::int2[] <@ c.conkey
+            LIMIT  1
+            """;
+
     public PgSQLDataGenerator(Parameters parameters) throws Exception {
         ConnectionParameters connectionParameters = parameters.getConnectionParameters();
 
@@ -104,6 +119,7 @@ public class PgSQLDataGenerator {
         this.conn = DriverManager.getConnection(url, props);
         try {
             this.databaseLayout = new DatabaseLayout();
+            this.parentRowSource = new JdbcParentRowSource(this.conn);
             Map<String, Rule> fieldGenerationRules =  parameters.getFieldGenerationRules();
 
             this.dataInserter = switch (parameters.getStrategy()) {
@@ -132,9 +148,14 @@ public class PgSQLDataGenerator {
     }
 
     PgSQLDataGenerator(Connection conn, DatabaseLayout databaseLayout, DataInserter dataInserter) {
+        this(conn, databaseLayout, dataInserter, new JdbcParentRowSource(conn));
+    }
+
+    PgSQLDataGenerator(Connection conn, DatabaseLayout databaseLayout, DataInserter dataInserter, ParentRowSource parentRowSource) {
         this.conn = conn;
         this.databaseLayout = databaseLayout;
         this.dataInserter = dataInserter;
+        this.parentRowSource = parentRowSource;
     }
 
     private void extractTablesAndSchemas() throws SQLException {
@@ -221,7 +242,7 @@ public class PgSQLDataGenerator {
                     continue;
                 }
 
-                this.databaseLayout.addTableEdge(referencedTable, table, Map.of(referencedFieldOrigTable, referenceFieldCurrentTable));
+                this.databaseLayout.addTableEdge(referencedTable, table, Map.of(referencedFieldOrigTable, referenceFieldCurrentTable), fkName);
                 discoveredParents.add(referencedTable);
             }
         }
@@ -283,24 +304,42 @@ public class PgSQLDataGenerator {
 
     // A rule naming a constraint that does not exist is almost certainly a typo and would be
     // silently ignored, so every key is checked against pg_constraint before any data is written.
+    // A rule allowing several children per parent on a column that is unique would only fail
+    // later on the insert, so that is rejected here too.
     private void validateReferenceRules(Map<String, ReferenceRule> referenceRules) throws SQLException {
         if (referenceRules == null || referenceRules.isEmpty()) return;
-        try (PreparedStatement statement = conn.prepareStatement(FIND_FOREIGN_KEY_CONSTRAINT)) {
-            for (String key : referenceRules.keySet()) {
-                List<String> name = SqlIdentifiers.parse(key, 3);
-                statement.setString(1, name.get(0));
-                statement.setString(2, name.get(1));
-                statement.setString(3, name.get(2));
-                try (ResultSet found = statement.executeQuery()) {
+        try (PreparedStatement exists = conn.prepareStatement(FIND_FOREIGN_KEY_CONSTRAINT);
+             PreparedStatement unique = conn.prepareStatement(FIND_UNIQUE_INDEX_ON_FOREIGN_KEY)) {
+            for (Map.Entry<String, ReferenceRule> entry : referenceRules.entrySet()) {
+                List<String> name = SqlIdentifiers.parse(entry.getKey(), 3);
+                for (PreparedStatement statement : List.of(exists, unique)) {
+                    statement.setString(1, name.get(0));
+                    statement.setString(2, name.get(1));
+                    statement.setString(3, name.get(2));
+                }
+                try (ResultSet found = exists.executeQuery()) {
                     if (!found.next()) {
                         throw new DataGenerationException(
                                 "referenceRules: foreign key constraint %s not found on table %s.%s"
                                         .formatted(name.get(2), name.get(0), name.get(1)));
                     }
                 }
+                if (entry.getValue().max() > 1) {
+                    try (ResultSet index = unique.executeQuery()) {
+                        if (index.next()) {
+                            throw new DataGenerationException(
+                                    "referenceRules %s: childrenPerParent %s allows several children per parent, but the referencing column(s) are unique (index %s)"
+                                            .formatted(entry.getKey(), entry.getValue().getChildrenPerParent(), index.getString(1)));
+                        }
+                    }
+                }
             }
         }
-        log.warn("referenceRules are validated but not applied yet: every foreign key still uses one child per parent");
+    }
+
+    private static String referenceRuleKey(Table child, String constraintName) {
+        return SqlIdentifiers.configPart(child.getSchema()) + "." + SqlIdentifiers.configPart(child.getTableName())
+                + "." + SqlIdentifiers.configPart(constraintName);
     }
 
     // package-private for PgSQLDataGeneratorCustomLinksTest: exercising it does not need a
@@ -380,6 +419,8 @@ public class PgSQLDataGenerator {
     //                }
     //            }
                 List<Table> sortedTables = topologicalSort(graph);
+                Map<String, ReferenceRule> referenceRules = parameters.getReferenceRules();
+                Set<String> unusedRules = referenceRules == null ? new HashSet<>() : new HashSet<>(referenceRules.keySet());
 
                 for (Table table : sortedTables) {
                     if (!this.databaseLayout.isGenerationTarget(table)) {
@@ -396,11 +437,24 @@ public class PgSQLDataGenerator {
                             continue;
                         }
 
-                        fieldValuesMap.putAll(extractLinkedField(graph.getEdgeSource(edge), edge.getReferencedFields(), parameters.getAmountOfEntries()));
+                        ReferenceRule rule = ReferenceRule.DEFAULT;
+                        if (edge.getConstraintName() != null && referenceRules != null) {
+                            String key = referenceRuleKey(table, edge.getConstraintName());
+                            ReferenceRule configured = referenceRules.get(key);
+                            if (configured != null) {
+                                rule = configured;
+                                unusedRules.remove(key);
+                            }
+                        }
+                        fieldValuesMap.putAll(extractLinkedField(graph.getEdgeSource(edge), table, edge, parameters.getAmountOfEntries(), rule));
                     }
 
                     this.dataInserter.generateAndInsert(table, parameters, fieldValuesMap);
                     log.info("Finished generation for table: {}", table);
+                }
+
+                if (!unusedRules.isEmpty()) {
+                    log.warn("referenceRules ignored, their foreign keys were not used in this run: {}", unusedRules);
                 }
 
                 conn.commit();
@@ -459,40 +513,27 @@ public class PgSQLDataGenerator {
         return result;
     }
 
-    private Map<Field, List<Object>> extractLinkedField(Table sourceTable, Map<Field, Field> referenceFieldMap, int amountOfEntries) throws SQLException {
-        String sqlFields = referenceFieldMap.keySet().stream().map(field -> SqlIdentifiers.quote(field.getName())).collect(Collectors.joining(","));
-        // referenced values are consumed one-per-row with no reuse (see Inserter.nextReferencedValue),
-        // so the source table never needs to hand back more rows than are being generated here -
-        // without this LIMIT, a large pre-existing parent (e.g. outside tablesToGenerate) gets
-        // fully materialized into an ArrayList even to generate a handful of child rows
-        String sqlQuery = "SELECT %s FROM %s LIMIT ?".formatted(sqlFields, SqlIdentifiers.qualified(sourceTable.getSchema(), sourceTable.getTableName()));
-        Map<Field, List<Object>> linkedFields = referenceFieldMap.values().stream().collect(Collectors.toMap(
-                field -> field,
-                value -> new ArrayList<>()
-        ));
-        conn.setSchema(sourceTable.getSchema());
+    // Builds, for every referencing column of the child, the list of values the inserters consume.
+    // Inserters take values from the END of the list, one per row, so the list is filled in reverse:
+    // the last element is the value for the first row. Several columns of one link stay in sync
+    // because they are all built from the same row-to-parent plan.
+    private Map<Field, List<Object>> extractLinkedField(Table parent, Table child, ReferenceEdge edge, int amountOfEntries, ReferenceRule rule) throws SQLException {
+        Map<Field, Field> referenceFieldMap = edge.getReferencedFields();
+        String link = "Foreign key %s on %s".formatted(edge.getConstraintName() == null ? "(custom link to " + parent + ")" : edge.getConstraintName(), child);
+        List<Field> parentFields = new ArrayList<>(referenceFieldMap.keySet());
 
-        try (PreparedStatement preparedStatement = conn.prepareStatement(sqlQuery)) {
-            preparedStatement.setInt(1, amountOfEntries);
-            // higher than the small pre-P2.2 default: LIMIT can return up to amountOfEntries rows,
-            // and at scale the old fetchSize=100 meant thousands of extra client/server round trips
-            preparedStatement.setFetchSize(5000);
-            ResultSet resultSet = preparedStatement.executeQuery();
+        int wanted = ReferencePlanner.parentsToRead(amountOfEntries, rule, link);
+        List<Object[]> parentRows = parentRowSource.read(parent, parentFields, wanted);
+        int[] parentOfRow = ReferencePlanner.assign(amountOfEntries, parentRows.size(), rule, random, link);
 
-            // resolve column name -> index once: getObject(String) re-resolves the name on every
-            // call, which adds up once this loop runs amountOfEntries times
-            Map<Integer, Field> columnIndexToTargetField = new HashMap<>();
-            for (Field field : referenceFieldMap.keySet()) {
-                columnIndexToTargetField.put(resultSet.findColumn(field.getName()), referenceFieldMap.get(field));
+        Map<Field, List<Object>> linkedFields = new HashMap<>();
+        for (int column = 0; column < parentFields.size(); column++) {
+            List<Object> values = new ArrayList<>(amountOfEntries);
+            for (int row = amountOfEntries - 1; row >= 0; row--) {
+                values.add(parentRows.get(parentOfRow[row])[column]);
             }
-
-            while (resultSet.next()) {
-                for (Map.Entry<Integer, Field> entry : columnIndexToTargetField.entrySet()) {
-                    linkedFields.get(entry.getValue()).add(resultSet.getObject(entry.getKey()));
-                }
-            }
+            linkedFields.put(referenceFieldMap.get(parentFields.get(column)), values);
         }
-
         return linkedFields;
     }
 }

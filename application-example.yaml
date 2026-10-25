@@ -28,8 +28,9 @@ tablesToGenerate:
 
 # How many child rows point to one parent row. Key: schema.table.constraint_name of a foreign key
 # (see `\d table` in psql); a name that does not exist is an error. Value: childrenPerParent [min, max],
-# both inclusive, 0 <= min <= max, max >= 1. Without a rule a foreign key uses [1, 1].
-# NOT APPLIED YET: the rules are parsed and validated, but generation still uses one child per parent.
+# both inclusive, 0 <= min <= max, max >= 1. amountOfEntries stays the total number of child rows;
+# parents that are not picked get no children (only possible with min 0).
+# Without a rule a foreign key uses [1, 1]: one child per parent. customTableLinks always use [1, 1].
 # referenceRules:
 #   my-schema.my_cool_table.my_cool_table_parent_fkey:
 #     childrenPerParent: [0, 5]
