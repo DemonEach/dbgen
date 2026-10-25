@@ -20,6 +20,7 @@ import java.net.URL;
 import java.util.List;
 import java.util.Map;
 import java.util.LinkedHashMap;
+import ru.demoneach.dbgenerator.entity.ReferenceRule;
 import ru.demoneach.dbgenerator.entity.Rule;
 
 
@@ -71,7 +72,30 @@ public class ConfigParser {
             });
             parameters.setCustomTableLinks(links);
         }
+        if (parameters.getReferenceRules() != null) {
+            Map<String, ReferenceRule> referenceRules = new LinkedHashMap<>();
+            parameters.getReferenceRules().forEach((key, rule) -> {
+                String normalized = SqlIdentifiers.normalize(key, 3);
+                if (referenceRules.containsKey(normalized)) throw new ParametFormatException("Duplicate reference rule: " + key);
+                validateReferenceRule(key, rule);
+                referenceRules.put(normalized, rule);
+            });
+            parameters.setReferenceRules(referenceRules);
+        }
         return parameters;
+    }
+
+    private void validateReferenceRule(String key, ReferenceRule rule) {
+        List<Integer> range = rule == null ? null : rule.getChildrenPerParent();
+        if (range == null || range.size() != 2 || range.contains(null)) {
+            throw new ParametFormatException(
+                    "referenceRules %s: childrenPerParent must be two numbers [min, max]".formatted(key));
+        }
+        if (range.get(0) < 0 || range.get(1) < 1 || range.get(0) > range.get(1)) {
+            throw new ParametFormatException(
+                    "referenceRules %s: childrenPerParent must satisfy 0 <= min <= max and max >= 1, but was %s"
+                            .formatted(key, range));
+        }
     }
 
     private void validateBatchParameters(Parameters parameters) {

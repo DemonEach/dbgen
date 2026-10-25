@@ -3,6 +3,7 @@ package ru.demoneach.dbgenerator.helper;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -167,5 +168,67 @@ class ConfigParserTest {
         Parameters parameters = new ConfigParser().parseConfig();
 
         assertEquals(java.util.List.of("my-schema.my_table"), parameters.getTablesToGenerate());
+    }
+
+    private static final String MINIMAL = """
+            amountOfEntries: 10
+            connectionParameters:
+              host: localhost
+              port: 5432
+              username: postgres
+              password: postgres
+              dbName: test_db
+            """;
+
+    @Test
+    void parsesAndNormalizesReferenceRules(@TempDir Path tempDir) throws IOException {
+        writeConfig(tempDir, MINIMAL + """
+                referenceRules:
+                  shop.orders.orders_customer_fk:
+                    childrenPerParent: [0, 5]
+                  '"my-schema"."Order Items".fk':
+                    childrenPerParent: [1, 1]
+                """);
+
+        var rules = new ConfigParser().parseConfig().getReferenceRules();
+
+        assertEquals(2, rules.size());
+        var orders = rules.get("shop.orders.orders_customer_fk");
+        assertEquals(0, orders.min());
+        assertEquals(5, orders.max());
+        assertEquals(1, rules.get("my-schema.\"Order Items\".fk").max());
+    }
+
+    @Test
+    void referenceRulesAreOptional(@TempDir Path tempDir) throws IOException {
+        writeConfig(tempDir, MINIMAL);
+
+        assertNull(new ConfigParser().parseConfig().getReferenceRules());
+    }
+
+    @Test
+    void rejectsInvalidReferenceRules(@TempDir Path tempDir) throws IOException {
+        for (String range : new String[]{"[1]", "[1, 2, 3]", "[3, 1]", "[-1, 2]", "[0, 0]", "[1, null]"}) {
+            writeConfig(tempDir, MINIMAL + "referenceRules:\n  shop.orders.fk:\n    childrenPerParent: " + range + "\n");
+            var e = assertThrows(ParametFormatException.class, () -> new ConfigParser().parseConfig(), range);
+            assertTrue(e.getMessage().contains("shop.orders.fk"), e.getMessage());
+        }
+        writeConfig(tempDir, MINIMAL + "referenceRules:\n  shop.orders.fk: {}\n");
+        assertThrows(ParametFormatException.class, () -> new ConfigParser().parseConfig());
+    }
+
+    @Test
+    void rejectsMalformedAndDuplicateReferenceRuleKeys(@TempDir Path tempDir) throws IOException {
+        writeConfig(tempDir, MINIMAL + "referenceRules:\n  shop.orders:\n    childrenPerParent: [1, 1]\n");
+        assertThrows(ParametFormatException.class, () -> new ConfigParser().parseConfig());
+
+        writeConfig(tempDir, MINIMAL + """
+                referenceRules:
+                  shop.orders.fk:
+                    childrenPerParent: [1, 1]
+                  shop."orders".fk:
+                    childrenPerParent: [1, 2]
+                """);
+        assertThrows(ParametFormatException.class, () -> new ConfigParser().parseConfig());
     }
 }

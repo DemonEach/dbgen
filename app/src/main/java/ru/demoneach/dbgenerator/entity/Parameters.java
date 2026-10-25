@@ -21,4 +21,6 @@ public class Parameters {
     private Integer amountOfEntries = 1000;
     private Map<String, String> customTableLinks;
     private Map<String, Rule> fieldGenerationRules;
+    // key: schema.table.constraint_name of a foreign key
+    private Map<String, ReferenceRule> referenceRules;
 }

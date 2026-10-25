@@ -115,6 +115,18 @@ Values for a foreign key are taken from the parent table with `LIMIT <rows reque
 a random sample of the parent, and each value is used once. Random sampling would need a full
 scan and sort of the parent, which is impractical for large tables.
 
+### Reference rules (work in progress)
+
+`referenceRules` will control how many child rows reference one parent row. The key is
+`schema.table.constraint_name` of the foreign key (so composite keys and several keys between
+the same two tables can be told apart); the value is `childrenPerParent: [min, max]`, inclusive,
+with `0 <= min <= max` and `max >= 1`. A foreign key without a rule uses `[1, 1]`.
+
+Currently the rules are only parsed and validated: malformed values fail at startup, and a key
+that does not name an existing foreign key constraint fails before anything is written.
+They do not change generation yet. Links from `customTableLinks` have no constraint and cannot
+be configured this way.
+
 ### Running the tests
 
 `./gradlew test` runs the unit tests. The PostgreSQL tests (`GeneratedColumnsPostgresTest`,

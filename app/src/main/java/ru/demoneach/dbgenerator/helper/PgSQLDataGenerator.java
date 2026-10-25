@@ -78,6 +78,14 @@ public class PgSQLDataGenerator {
             AND    c.contype  = 'f';
             """;
 
+    private static final String FIND_FOREIGN_KEY_CONSTRAINT = """
+            SELECT 1
+            FROM   pg_constraint c
+            JOIN   pg_class t ON t.oid = c.conrelid
+            JOIN   pg_namespace n ON n.oid = t.relnamespace
+            WHERE  n.nspname = ? AND t.relname = ? AND c.conname = ? AND c.contype = 'f'
+            """;
+
     public PgSQLDataGenerator(Parameters parameters) throws Exception {
         ConnectionParameters connectionParameters = parameters.getConnectionParameters();
 
@@ -262,6 +270,7 @@ public class PgSQLDataGenerator {
         // tables need their FKs queried.
         addCustomLinksBetweenTables(parameters.getCustomTableLinks());
         discoverForeignKeyGraph(parameters.getTablesToGenerate());
+        validateReferenceRules(parameters.getReferenceRules());
 
         if (log.isDebugEnabled()) {
             try {
@@ -270,6 +279,28 @@ public class PgSQLDataGenerator {
                 throw new RuntimeException(e);
             }
         }
+    }
+
+    // A rule naming a constraint that does not exist is almost certainly a typo and would be
+    // silently ignored, so every key is checked against pg_constraint before any data is written.
+    private void validateReferenceRules(Map<String, ReferenceRule> referenceRules) throws SQLException {
+        if (referenceRules == null || referenceRules.isEmpty()) return;
+        try (PreparedStatement statement = conn.prepareStatement(FIND_FOREIGN_KEY_CONSTRAINT)) {
+            for (String key : referenceRules.keySet()) {
+                List<String> name = SqlIdentifiers.parse(key, 3);
+                statement.setString(1, name.get(0));
+                statement.setString(2, name.get(1));
+                statement.setString(3, name.get(2));
+                try (ResultSet found = statement.executeQuery()) {
+                    if (!found.next()) {
+                        throw new DataGenerationException(
+                                "referenceRules: foreign key constraint %s not found on table %s.%s"
+                                        .formatted(name.get(2), name.get(0), name.get(1)));
+                    }
+                }
+            }
+        }
+        log.warn("referenceRules are validated but not applied yet: every foreign key still uses one child per parent");
     }
 
     // package-private for PgSQLDataGeneratorCustomLinksTest: exercising it does not need a
