@@ -291,6 +291,7 @@ public class PgSQLDataGenerator {
         // tables need their FKs queried.
         addCustomLinksBetweenTables(parameters.getCustomTableLinks());
         discoverForeignKeyGraph(parameters.getTablesToGenerate());
+        validateReferencingColumnsAreNotShared();
         validateReferenceRules(parameters.getReferenceRules());
 
         if (log.isDebugEnabled()) {
@@ -300,6 +301,34 @@ public class PgSQLDataGenerator {
                 throw new RuntimeException(e);
             }
         }
+    }
+
+    // Every foreign key gets its values independently, so a column that belongs to two keys (a custom
+    // link onto a column that is already a foreign key, or overlapping composite keys) cannot be
+    // filled consistently. Fail before anything is written.
+    private void validateReferencingColumnsAreNotShared() {
+        Graph<Table, ReferenceEdge> graph = this.databaseLayout.getLayoutGraph();
+        for (Table table : graph.vertexSet()) {
+            if (!this.databaseLayout.isGenerationTarget(table)) continue;
+            Map<Field, ReferenceEdge> owner = new HashMap<>();
+            for (ReferenceEdge edge : graph.incomingEdgesOf(table)) {
+                if (graph.getEdgeSource(edge).equals(table)) continue;
+                for (Field column : edge.getReferencedFields().values()) {
+                    ReferenceEdge other = owner.put(column, edge);
+                    if (other != null) {
+                        throw new DataGenerationException(
+                                "Column %s of %s belongs to more than one foreign key (%s and %s); overlapping keys are not supported yet"
+                                        .formatted(column.getName(), table, describe(other, graph), describe(edge, graph)));
+                    }
+                }
+            }
+        }
+    }
+
+    private static String describe(ReferenceEdge edge, Graph<Table, ReferenceEdge> graph) {
+        return edge.getConstraintName() != null
+                ? edge.getConstraintName()
+                : "customTableLinks to " + graph.getEdgeSource(edge);
     }
 
     // A rule naming a constraint that does not exist is almost certainly a typo and would be

@@ -104,11 +104,14 @@ regenerated: its existing rows are read and reused as-is. This also applies thro
 tables elsewhere in the schema are left alone, so an unsupported FK shape on a table you
 are not generating does not block the run.
 
-Composite foreign keys and more than one foreign key between the same pair of tables are
-not supported yet; both fail with a clear error naming the constraint and tables instead
-of silently using only one column or dropping one of the links. A referenced table with
-fewer rows than are being requested (including no rows at all) also fails with a clear
-error instead of an unrelated index-out-of-bounds exception.
+Several foreign keys between the same two tables (for example `created_by` and `updated_by`
+both pointing to `users`) are supported: each key gets its own values, chosen independently, and
+its own `referenceRules` entry. Composite foreign keys, and a column that belongs to more than one
+key (such as a `customTableLinks` entry onto a column that already has a foreign key to another
+table), are not supported yet; both fail before anything is written with a message naming the
+column and the keys involved. A `customTableLinks` entry that repeats a real foreign key is merged
+with it. A referenced table with fewer rows than are being requested (including no rows at all)
+also fails with a clear error.
 
 ### Reference rules
 

@@ -3,7 +3,7 @@ package ru.demoneach.dbgenerator.entity;
 import java.util.Map;
 
 public class ReferenceEdge {
-    // perhaps there may be a situation with several references of the same field, but this should not be the case in most cases.
+    // parent column -> referencing column; an edge is one foreign key (several edges may join the same two tables)
     private Map<Field, Field> referencedFields;
 
     // name of the foreign key constraint; null for links that come from customTableLinks
@@ -22,6 +22,10 @@ public class ReferenceEdge {
 
     public String getConstraintName() {
         return constraintName;
+    }
+
+    public void setConstraintName(String constraintName) {
+        this.constraintName = constraintName;
     }
 
     public Map<Field, Field> getReferencedFields() {

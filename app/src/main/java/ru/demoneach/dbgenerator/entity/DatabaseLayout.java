@@ -5,8 +5,7 @@ import com.mxgraph.layout.mxIGraphLayout;
 import com.mxgraph.util.mxCellRenderer;
 import org.jgrapht.Graph;
 import org.jgrapht.ext.JGraphXAdapter;
-import org.jgrapht.graph.DefaultDirectedGraph;
-import ru.demoneach.dbgenerator.exception.DataGenerationException;
+import org.jgrapht.graph.DirectedPseudograph;
 
 import javax.imageio.ImageIO;
 import java.awt.*;
@@ -22,7 +21,7 @@ public class DatabaseLayout {
     private Set<Table> generationTargets;
 
     public DatabaseLayout() {
-        this.layoutGraph = new DefaultDirectedGraph<>(ReferenceEdge.class);
+        this.layoutGraph = new DirectedPseudograph<>(ReferenceEdge.class);
     }
 
     public void addTableVertex(String schema, String tableName, Map<String, String> tableFields) {
@@ -39,17 +38,16 @@ public class DatabaseLayout {
     }
 
     public void addTableEdge(Table referencedTable, Table currentTable, Map<Field, Field> referenceFieldMap, String constraintName) {
-        ReferenceEdge referenceEdge = new ReferenceEdge(referenceFieldMap, constraintName);
-
-        // the underlying graph is not a multigraph: a second edge between the same pair of
-        // tables (several FKs on one pair, or a custom link duplicating a real FK) is silently
-        // dropped by addEdge() instead of being generated for. Fail loudly until this is supported.
-        if (!this.layoutGraph.addEdge(referencedTable, currentTable, referenceEdge)) {
-            ReferenceEdge existing = this.layoutGraph.getEdge(referencedTable, currentTable);
-            throw new DataGenerationException(
-                    "Multiple foreign keys between %s and %s are not supported yet. Existing link:\n%sNew link:\n%s"
-                            .formatted(referencedTable, currentTable, existing, referenceEdge));
+        // The same link can be found twice, e.g. a customTableLinks entry repeating a real foreign
+        // key: keep one edge, but let it carry the constraint name so referenceRules can find it.
+        for (ReferenceEdge existing : layoutGraph.getAllEdges(referencedTable, currentTable)) {
+            if (existing.getReferencedFields().equals(referenceFieldMap)) {
+                if (existing.getConstraintName() == null) existing.setConstraintName(constraintName);
+                return;
+            }
         }
+        // a multigraph: several foreign keys between one pair of tables are separate edges
+        layoutGraph.addEdge(referencedTable, currentTable, new ReferenceEdge(referenceFieldMap, constraintName));
     }
 
     public void setGenerationTargets(Set<Table> generationTargets) {

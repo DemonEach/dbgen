@@ -1,7 +1,6 @@
 package ru.demoneach.dbgenerator.entity;
 
 import org.junit.jupiter.api.Test;
-import ru.demoneach.dbgenerator.exception.DataGenerationException;
 
 import java.util.Map;
 import java.util.Set;
@@ -11,24 +10,40 @@ import static org.junit.jupiter.api.Assertions.*;
 class DatabaseLayoutTest {
 
     @Test
-    void secondForeignKeyBetweenSamePairOfTablesIsRejected() {
+    void severalForeignKeysBetweenSamePairOfTablesAreSeparateEdges() {
         DatabaseLayout layout = new DatabaseLayout();
-        layout.addTableVertex("public", "parent", Map.of("id", "integer", "other_id", "integer"));
-        layout.addTableVertex("public", "child", Map.of("parent_id", "integer", "other_parent_id", "integer"));
+        layout.addTableVertex("public", "parent", Map.of("id", "integer"));
+        layout.addTableVertex("public", "child", Map.of("created_by", "integer", "updated_by", "integer"));
 
         Table parent = findTable(layout, "parent");
         Table child = findTable(layout, "child");
         Field id = fieldNamed(parent, "id");
-        Field otherId = fieldNamed(parent, "other_id");
-        Field parentId = fieldNamed(child, "parent_id");
-        Field otherParentId = fieldNamed(child, "other_parent_id");
 
-        layout.addTableEdge(parent, child, Map.of(id, parentId));
+        layout.addTableEdge(parent, child, Map.of(id, fieldNamed(child, "created_by")), "child_created_by_fkey");
+        layout.addTableEdge(parent, child, Map.of(id, fieldNamed(child, "updated_by")), "child_updated_by_fkey");
 
-        // the underlying graph does not support parallel edges: a second, distinct FK between the
-        // same pair of tables must fail loudly instead of being silently dropped
-        assertThrows(DataGenerationException.class,
-                () -> layout.addTableEdge(parent, child, Map.of(otherId, otherParentId)));
+        var edges = layout.getLayoutGraph().getAllEdges(parent, child);
+        assertEquals(2, edges.size());
+        assertEquals(Set.of("child_created_by_fkey", "child_updated_by_fkey"),
+                edges.stream().map(ReferenceEdge::getConstraintName).collect(java.util.stream.Collectors.toSet()));
+    }
+
+    @Test
+    void sameLinkFoundTwiceKeepsOneEdgeAndTheConstraintName() {
+        DatabaseLayout layout = new DatabaseLayout();
+        layout.addTableVertex("public", "parent", Map.of("id", "integer"));
+        layout.addTableVertex("public", "child", Map.of("parent_id", "integer"));
+        Table parent = findTable(layout, "parent");
+        Table child = findTable(layout, "child");
+        Map<Field, Field> link = Map.of(fieldNamed(parent, "id"), fieldNamed(child, "parent_id"));
+
+        layout.addTableEdge(parent, child, link); // customTableLinks entry, no constraint
+        layout.addTableEdge(parent, child, link, "child_parent_fkey"); // the real foreign key
+        layout.addTableEdge(parent, child, link); // a repeat must not drop the name again
+
+        var edges = layout.getLayoutGraph().getAllEdges(parent, child);
+        assertEquals(1, edges.size());
+        assertEquals("child_parent_fkey", edges.iterator().next().getConstraintName());
     }
 
     @Test
