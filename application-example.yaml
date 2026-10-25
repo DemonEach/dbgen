@@ -30,7 +30,11 @@ tablesToGenerate:
 # (see `\d table` in psql); a name that does not exist is an error. Value: childrenPerParent [min, max],
 # both inclusive, 0 <= min <= max, max >= 1. amountOfEntries stays the total number of child rows;
 # parents that are not picked get no children (only possible with min 0).
-# Without a rule a foreign key uses [1, 1]: one child per parent. customTableLinks always use [1, 1].
+# Without a rule a foreign key uses [1, 1]: one child per parent.
+# For a link declared in customTableLinks (it has no constraint) the key is its referencing column,
+# written as in customTableLinks, e.g. a service schema without a real foreign key to another one:
+#   my-schema.my_cool_table.other_id:
+#     childrenPerParent: [1, 5]
 # referenceRules:
 #   my-schema.my_cool_table.my_cool_table_parent_fkey:
 #     childrenPerParent: [0, 5]

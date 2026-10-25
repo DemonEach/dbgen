@@ -20,6 +20,17 @@ public class ReferenceEdge {
         this.constraintName = constraintName;
     }
 
+    // true when the link was also (or only) declared in customTableLinks
+    private boolean customLink;
+
+    public boolean isCustomLink() {
+        return customLink;
+    }
+
+    public void setCustomLink(boolean customLink) {
+        this.customLink = customLink;
+    }
+
     public String getConstraintName() {
         return constraintName;
     }

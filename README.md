@@ -106,12 +106,18 @@ are not generating does not block the run.
 
 Several foreign keys between the same two tables (for example `created_by` and `updated_by`
 both pointing to `users`) are supported: each key gets its own values, chosen independently, and
-its own `referenceRules` entry. Composite foreign keys, and a column that belongs to more than one
-key (such as a `customTableLinks` entry onto a column that already has a foreign key to another
-table), are not supported yet; both fail before anything is written with a message naming the
-column and the keys involved. A `customTableLinks` entry that repeats a real foreign key is merged
-with it. A referenced table with fewer rows than are being requested (including no rows at all)
-also fails with a clear error.
+its own `referenceRules` entry.
+
+Composite foreign keys are supported: a child row takes all the key columns from one parent row,
+so the pair (or triple, ...) is always an existing combination. `childrenPerParent` counts children
+per parent row, and the unique-column check treats a unique index on any part of the key as unique.
+
+Overlapping keys are not supported: a column that belongs to more than one key (for example
+`order_id` in both a composite key and a separate foreign key to `orders`, or a `customTableLinks`
+entry onto a column that already has a foreign key to another table) cannot be filled consistently,
+so the run fails before anything is written with a message naming the column and the keys involved.
+A `customTableLinks` entry that repeats a real foreign key is merged with it. A referenced table
+with fewer rows than are being requested (including no rows at all) also fails with a clear error.
 
 ### Reference rules
 
@@ -134,9 +140,28 @@ referenceRules:
   Child rows of one parent are shuffled across the table, not stored next to each other.
 - When the numbers do not fit (for example 7 rows with exactly 3 children per parent, or too few
   parent rows for the requested `max`) the run fails before writing anything and says why.
-- The constraint must exist and be a foreign key, otherwise the run stops at startup. A rule with
+- The key must name an existing foreign key constraint, or the referencing column of a
+  `customTableLinks` entry (see below), otherwise the run stops at startup. A rule with
   `max > 1` on a referencing column that has a unique index is rejected too, since the insert
-  would fail on it. Links from `customTableLinks` have no constraint and always use `[1, 1]`.
+  would fail on it.
+
+A link from `customTableLinks` has no constraint, so its rule is keyed by the referencing column,
+written exactly as in `customTableLinks`. This is how separate services that share one database
+(one schema each, no foreign key between them) get several children per parent:
+
+```yaml
+customTableLinks:
+  order_service.order.client_id: client_service.client.id
+referenceRules:
+  order_service.order.client_id:
+    childrenPerParent: [1, 5]   # 1..5 orders per client
+```
+
+Both schemas must be in the one database the generator connects to; a table in another database
+cannot be linked. Without a rule a custom link uses `[1, 1]` like any other key. If a custom link
+repeats a real foreign key, the rule can use either the column or the constraint name, but not
+both. A key that names both a constraint and a custom-link column of the same table is ambiguous
+and rejected.
 
 Parents are chosen randomly with bounded memory. A parent table that is much larger than needed
 is read with `TABLESAMPLE BERNOULLI`, which costs one sequential scan; a small one is read and

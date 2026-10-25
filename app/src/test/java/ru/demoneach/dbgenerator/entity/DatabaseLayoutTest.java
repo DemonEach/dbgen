@@ -37,13 +37,15 @@ class DatabaseLayoutTest {
         Table child = findTable(layout, "child");
         Map<Field, Field> link = Map.of(fieldNamed(parent, "id"), fieldNamed(child, "parent_id"));
 
-        layout.addTableEdge(parent, child, link); // customTableLinks entry, no constraint
+        layout.addTableEdge(parent, child, link, null, true); // customTableLinks entry, no constraint
         layout.addTableEdge(parent, child, link, "child_parent_fkey"); // the real foreign key
         layout.addTableEdge(parent, child, link); // a repeat must not drop the name again
 
         var edges = layout.getLayoutGraph().getAllEdges(parent, child);
         assertEquals(1, edges.size());
-        assertEquals("child_parent_fkey", edges.iterator().next().getConstraintName());
+        ReferenceEdge merged = edges.iterator().next();
+        assertEquals("child_parent_fkey", merged.getConstraintName());
+        assertTrue(merged.isCustomLink(), "the edge must remember it was also declared in customTableLinks");
     }
 
     @Test

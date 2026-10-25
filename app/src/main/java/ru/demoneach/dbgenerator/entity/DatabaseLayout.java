@@ -38,16 +38,25 @@ public class DatabaseLayout {
     }
 
     public void addTableEdge(Table referencedTable, Table currentTable, Map<Field, Field> referenceFieldMap, String constraintName) {
+        addTableEdge(referencedTable, currentTable, referenceFieldMap, constraintName, false);
+    }
+
+    public void addTableEdge(Table referencedTable, Table currentTable, Map<Field, Field> referenceFieldMap,
+                             String constraintName, boolean customLink) {
         // The same link can be found twice, e.g. a customTableLinks entry repeating a real foreign
-        // key: keep one edge, but let it carry the constraint name so referenceRules can find it.
+        // key: keep one edge, but let it carry both the constraint name and the custom flag so
+        // referenceRules can find it either way.
         for (ReferenceEdge existing : layoutGraph.getAllEdges(referencedTable, currentTable)) {
             if (existing.getReferencedFields().equals(referenceFieldMap)) {
                 if (existing.getConstraintName() == null) existing.setConstraintName(constraintName);
+                if (customLink) existing.setCustomLink(true);
                 return;
             }
         }
         // a multigraph: several foreign keys between one pair of tables are separate edges
-        layoutGraph.addEdge(referencedTable, currentTable, new ReferenceEdge(referenceFieldMap, constraintName));
+        ReferenceEdge edge = new ReferenceEdge(referenceFieldMap, constraintName);
+        edge.setCustomLink(customLink);
+        layoutGraph.addEdge(referencedTable, currentTable, edge);
     }
 
     public void setGenerationTargets(Set<Table> generationTargets) {

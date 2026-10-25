@@ -64,20 +64,22 @@ public class PgSQLDataGenerator {
                 );
             """;
 
+    // One row per column of a foreign key, in the order of the key, so composite keys come back
+    // as several consecutive rows with the same fk_name.
     private static final String GET_REFERENCES_FOR_TABLE_AND_FIELDS = """
             SELECT parent.relname AS referenced_table, ns.nspname AS referenced_schema
                   ,f.attname AS referenced_column
                   ,c.conname AS fk_name
                   ,a.attname
-                  ,cardinality(c.conkey) AS fk_column_count
             FROM   pg_constraint c
-            JOIN   pg_attribute  a ON (c.conrelid, c.conkey[1]) = (a.attrelid, a.attnum)
+            CROSS JOIN LATERAL unnest(c.conkey, c.confkey) WITH ORDINALITY AS k(child_attnum, parent_attnum, ord)
+            JOIN   pg_attribute  a ON a.attrelid = c.conrelid AND a.attnum = k.child_attnum
             JOIN   pg_class parent ON parent.oid = c.confrelid
             JOIN   pg_namespace ns ON ns.oid = parent.relnamespace
-            JOIN   pg_attribute  f ON f.attrelid = c.confrelid
-                                  AND f.attnum = c.confkey[1]
+            JOIN   pg_attribute  f ON f.attrelid = c.confrelid AND f.attnum = k.parent_attnum
             WHERE  c.conrelid = ?::regclass   -- table name
-            AND    c.contype  = 'f';
+            AND    c.contype  = 'f'
+            ORDER BY c.conname, k.ord;
             """;
 
     private static final String FIND_FOREIGN_KEY_CONSTRAINT = """
@@ -98,6 +100,20 @@ public class PgSQLDataGenerator {
             WHERE  n.nspname = ? AND t.relname = ? AND c.conname = ? AND c.contype = 'f'
             AND    i.indisunique AND i.indpred IS NULL AND i.indexprs IS NULL
             AND    i.indkey::int2[] <@ c.conkey
+            LIMIT  1
+            """;
+
+    // Unique index that makes one column unique on its own (used for customTableLinks, which have no constraint)
+    private static final String FIND_UNIQUE_INDEX_ON_COLUMN = """
+            SELECT idx.relname
+            FROM   pg_index i
+            JOIN   pg_class t ON t.oid = i.indrelid
+            JOIN   pg_namespace n ON n.oid = t.relnamespace
+            JOIN   pg_attribute a ON a.attrelid = t.oid
+            JOIN   pg_class idx ON idx.oid = i.indexrelid
+            WHERE  n.nspname = ? AND t.relname = ? AND a.attname = ?
+            AND    i.indisunique AND i.indpred IS NULL AND i.indexprs IS NULL
+            AND    i.indkey::int2[] <@ ARRAY[a.attnum]
             LIMIT  1
             """;
 
@@ -204,14 +220,16 @@ public class PgSQLDataGenerator {
             conn.setSchema(table.getSchema());
             getReferencesStatement.setString(1, SqlIdentifiers.qualified(table.getSchema(), table.getTableName()));
 
+            // constraint name -> (parent column -> referencing column), in the order of the key
+            Map<String, Map<Field, Field>> columnsByConstraint = new LinkedHashMap<>();
+            Map<String, Table> parentByConstraint = new HashMap<>();
+            Set<String> skipped = new HashSet<>();
+
             ResultSet references = getReferencesStatement.executeQuery();
             while (Objects.nonNull(references) && references.next()) {
                 String fkName = references.getString("fk_name");
-                int fkColumnCount = references.getInt("fk_column_count");
-                if (fkColumnCount != 1) {
-                    throw new DataGenerationException(
-                            "Composite foreign key %s on %s references %d columns; composite FKs are not supported yet"
-                                    .formatted(fkName, table, fkColumnCount));
+                if (skipped.contains(fkName)) {
+                    continue;
                 }
 
                 String referencedTableName = references.getString("referenced_table");
@@ -224,11 +242,7 @@ public class PgSQLDataGenerator {
                         .findFirst()
                         .orElse(null);
 
-                if (Objects.isNull(referencedTable)) {
-                    continue;
-                }
-
-                Field referencedFieldOrigTable = referencedTable.getFields().stream()
+                Field referencedFieldOrigTable = referencedTable == null ? null : referencedTable.getFields().stream()
                         .filter(f -> f.getName().equals(referencedColumn))
                         .findFirst()
                         .orElse(null);
@@ -238,11 +252,23 @@ public class PgSQLDataGenerator {
                         .findFirst()
                         .orElse(null);
 
-                if (Objects.isNull(referencedFieldOrigTable) || Objects.isNull(referenceFieldCurrentTable)) {
+                // a key whose parent or any column is unknown is left out as a whole: a part of a
+                // composite key could not be filled consistently
+                if (Objects.isNull(referencedTable) || Objects.isNull(referencedFieldOrigTable)
+                        || Objects.isNull(referenceFieldCurrentTable)) {
+                    skipped.add(fkName);
+                    columnsByConstraint.remove(fkName);
                     continue;
                 }
 
-                this.databaseLayout.addTableEdge(referencedTable, table, Map.of(referencedFieldOrigTable, referenceFieldCurrentTable), fkName);
+                columnsByConstraint.computeIfAbsent(fkName, name -> new LinkedHashMap<>())
+                        .put(referencedFieldOrigTable, referenceFieldCurrentTable);
+                parentByConstraint.put(fkName, referencedTable);
+            }
+
+            for (Map.Entry<String, Map<Field, Field>> foreignKey : columnsByConstraint.entrySet()) {
+                Table referencedTable = parentByConstraint.get(foreignKey.getKey());
+                this.databaseLayout.addTableEdge(referencedTable, table, foreignKey.getValue(), foreignKey.getKey());
                 discoveredParents.add(referencedTable);
             }
         }
@@ -252,7 +278,7 @@ public class PgSQLDataGenerator {
     // Discovers the FK graph. When tablesToGenerate restricts the run, only the requested tables
     // and their FK parents - direct, transitive, or reached through a customTableLinks edge - are
     // queried and kept; every other table (including ones with an FK shape this tool does not
-    // support yet, such as a composite key) is left alone instead of blocking the run.
+    // support, such as overlapping keys) is left alone instead of blocking the run.
     private void discoverForeignKeyGraph(List<String> requiredTables) throws SQLException {
         Graph<Table, ReferenceEdge> graph = this.databaseLayout.getLayoutGraph();
         Set<Table> verticies = graph.vertexSet();
@@ -292,7 +318,7 @@ public class PgSQLDataGenerator {
         addCustomLinksBetweenTables(parameters.getCustomTableLinks());
         discoverForeignKeyGraph(parameters.getTablesToGenerate());
         validateReferencingColumnsAreNotShared();
-        validateReferenceRules(parameters.getReferenceRules());
+        validateReferenceRules(parameters.getReferenceRules(), parameters.getCustomTableLinks());
 
         if (log.isDebugEnabled()) {
             try {
@@ -331,30 +357,40 @@ public class PgSQLDataGenerator {
                 : "customTableLinks to " + graph.getEdgeSource(edge);
     }
 
-    // A rule naming a constraint that does not exist is almost certainly a typo and would be
-    // silently ignored, so every key is checked against pg_constraint before any data is written.
-    // A rule allowing several children per parent on a column that is unique would only fail
-    // later on the insert, so that is rejected here too.
-    private void validateReferenceRules(Map<String, ReferenceRule> referenceRules) throws SQLException {
+    // A rule key is either the name of a foreign key constraint, or the referencing column of a
+    // customTableLinks entry (such a link has no constraint). A key that is neither is almost certainly
+    // a typo and would be silently ignored, so it is rejected before any data is written. A rule
+    // allowing several children per parent on a column that is unique would only fail later on the
+    // insert, so that is rejected here too.
+    private void validateReferenceRules(Map<String, ReferenceRule> referenceRules, Map<String, String> customTableLinks) throws SQLException {
         if (referenceRules == null || referenceRules.isEmpty()) return;
         try (PreparedStatement exists = conn.prepareStatement(FIND_FOREIGN_KEY_CONSTRAINT);
-             PreparedStatement unique = conn.prepareStatement(FIND_UNIQUE_INDEX_ON_FOREIGN_KEY)) {
+             PreparedStatement uniqueOnKey = conn.prepareStatement(FIND_UNIQUE_INDEX_ON_FOREIGN_KEY);
+             PreparedStatement uniqueOnColumn = conn.prepareStatement(FIND_UNIQUE_INDEX_ON_COLUMN)) {
             for (Map.Entry<String, ReferenceRule> entry : referenceRules.entrySet()) {
                 List<String> name = SqlIdentifiers.parse(entry.getKey(), 3);
-                for (PreparedStatement statement : List.of(exists, unique)) {
+                for (PreparedStatement statement : List.of(exists, uniqueOnKey, uniqueOnColumn)) {
                     statement.setString(1, name.get(0));
                     statement.setString(2, name.get(1));
                     statement.setString(3, name.get(2));
                 }
+                boolean isConstraint;
                 try (ResultSet found = exists.executeQuery()) {
-                    if (!found.next()) {
-                        throw new DataGenerationException(
-                                "referenceRules: foreign key constraint %s not found on table %s.%s"
-                                        .formatted(name.get(2), name.get(0), name.get(1)));
-                    }
+                    isConstraint = found.next();
+                }
+                boolean isCustomLink = customTableLinks != null && customTableLinks.containsKey(entry.getKey());
+                if (isConstraint && isCustomLink) {
+                    throw new DataGenerationException(
+                            "referenceRules %s is ambiguous: it names both a foreign key constraint and a customTableLinks column; rename the constraint or use the other key"
+                                    .formatted(entry.getKey()));
+                }
+                if (!isConstraint && !isCustomLink) {
+                    throw new DataGenerationException(
+                            "referenceRules: %s is neither a foreign key constraint of table %s.%s nor a column listed in customTableLinks"
+                                    .formatted(name.get(2), name.get(0), name.get(1)));
                 }
                 if (entry.getValue().max() > 1) {
-                    try (ResultSet index = unique.executeQuery()) {
+                    try (ResultSet index = (isConstraint ? uniqueOnKey : uniqueOnColumn).executeQuery()) {
                         if (index.next()) {
                             throw new DataGenerationException(
                                     "referenceRules %s: childrenPerParent %s allows several children per parent, but the referencing column(s) are unique (index %s)"
@@ -364,6 +400,23 @@ public class PgSQLDataGenerator {
                 }
             }
         }
+    }
+
+    // The rule of an edge: looked up by its constraint name and, for a link declared in
+    // customTableLinks, by its referencing column. Two different rules for one link are a mistake.
+    // Returns the key of the matching rule, or null when the link has none.
+    private static String findReferenceRuleKey(Table child, ReferenceEdge edge, Map<String, ReferenceRule> referenceRules) {
+        if (referenceRules == null || referenceRules.isEmpty()) return null;
+        Set<String> candidates = new LinkedHashSet<>();
+        if (edge.getConstraintName() != null) candidates.add(referenceRuleKey(child, edge.getConstraintName()));
+        if (edge.isCustomLink()) {
+            for (Field column : edge.getReferencedFields().values()) candidates.add(referenceRuleKey(child, column.getName()));
+        }
+        List<String> matched = candidates.stream().filter(referenceRules::containsKey).toList();
+        if (matched.size() > 1) {
+            throw new DataGenerationException("referenceRules %s all describe the same foreign key; keep only one".formatted(matched));
+        }
+        return matched.isEmpty() ? null : matched.get(0);
     }
 
     private static String referenceRuleKey(Table child, String constraintName) {
@@ -424,7 +477,7 @@ public class PgSQLDataGenerator {
             // edge must run parent -> child, same as the automatically detected FKs above:
             // origTable is the table that holds the referencing column (the child), referencedTable
             // is the table whose column is referenced (the parent) and must be generated first.
-            this.databaseLayout.addTableEdge(referencedTable, origTable, Map.of(referencedFieldOrigTable, referenceFieldCurrentTable));
+            this.databaseLayout.addTableEdge(referencedTable, origTable, Map.of(referencedFieldOrigTable, referenceFieldCurrentTable), null, true);
         }
     }
 
@@ -467,13 +520,10 @@ public class PgSQLDataGenerator {
                         }
 
                         ReferenceRule rule = ReferenceRule.DEFAULT;
-                        if (edge.getConstraintName() != null && referenceRules != null) {
-                            String key = referenceRuleKey(table, edge.getConstraintName());
-                            ReferenceRule configured = referenceRules.get(key);
-                            if (configured != null) {
-                                rule = configured;
-                                unusedRules.remove(key);
-                            }
+                        String ruleKey = findReferenceRuleKey(table, edge, referenceRules);
+                        if (ruleKey != null) {
+                            rule = referenceRules.get(ruleKey);
+                            unusedRules.remove(ruleKey);
                         }
                         fieldValuesMap.putAll(extractLinkedField(graph.getEdgeSource(edge), table, edge, parameters.getAmountOfEntries(), rule));
                     }
